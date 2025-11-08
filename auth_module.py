@@ -136,26 +136,36 @@ class AuthManager:
             return False, f"Erreur de connexion au serveur: {str(e)}"
     
     def send_otp(self, email):
-        """Envoyer un code OTP par email"""
+        """Envoyer un code OTP à l'email"""
         try:
-            backend = self._get_backend_url()
-            response = requests.post(
-                f"{backend}/auth/send-otp",
-                json={"email": email},
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                st.session_state.otp_sent = True
-                st.session_state.otp_email = email
-                st.session_state.otp_expiry = datetime.now() + timedelta(minutes=10)
-                return True, "Code OTP envoyé à votre email"
-            else:
-                error = response.json()
-                return False, error.get('message', 'Erreur lors de l\'envoi du OTP')
-                
-        except requests.exceptions.RequestException as e:
-            return False, f"Erreur de connexion au serveur: {str(e)}"
+            for i, backend_url in enumerate(self._get_backend_url()):
+                try:
+                    response = requests.post(
+                        f"{backend_url}/api/auth/send-otp",
+                        json={"email": email},
+                        timeout=5
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('success'):
+                            st.session_state.otp_sent = True
+                            st.session_state.otp_email = email
+                            
+                            # Afficher le code OTP en mode développement
+                            if 'debug' in data and data['debug'] and 'otpCode' in data['debug']:
+                                st.info(f"🔧 MODE DEV - Code OTP: **{data['debug']['otpCode']}**")
+                            
+                            return True, data.get('message', 'Code OTP envoyé')
+                        return False, data.get('message', 'Erreur lors de l\'envoi de l\'OTP')
+                    
+                except requests.exceptions.RequestException:
+                    if i < len(list(self._get_backend_url())) - 1:
+                        continue
+                    return False, "Impossible de contacter le serveur d'authentification"
+                    
+        except Exception as e:
+            return False, f"Erreur: {str(e)}"
     
     def verify_otp(self, email, otp_code):
         """Vérifier le code OTP"""
@@ -297,25 +307,86 @@ def show_auth_ui():
     
     if auth_tab == "🔑 Connexion":
         st.markdown("### Connexion")
-        with st.form("login_form"):
-            email = st.text_input("📧 Email", placeholder="votre.email@example.com")
-            password = st.text_input("🔒 Mot de passe", type="password")
-            submit = st.form_submit_button("Se connecter")
-            
-            if submit:
-                if email and password:
-                    with st.spinner("Connexion en cours..."):
-                        success, message = auth.login(email, password)
-                        if success:
-                            st.success(message)
-                            st.rerun()
+        
+        # Option: Connexion classique ou avec OTP
+        use_otp = st.checkbox("🔐 Utiliser l'authentification OTP (plus sécurisé)", value=False)
+        
+        if use_otp:
+            # Connexion avec OTP
+            if not st.session_state.get('login_otp_sent', False):
+                with st.form("login_otp_request_form"):
+                    email = st.text_input("📧 Email", placeholder="votre.email@example.com")
+                    submit = st.form_submit_button("Envoyer le code OTP")
+                    
+                    if submit:
+                        if email:
+                            with st.spinner("Envoi du code OTP..."):
+                                success, message = auth.send_otp(email)
+                                if success:
+                                    st.session_state.login_otp_sent = True
+                                    st.session_state.login_otp_email = email
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
                         else:
-                            st.error(message)
-                else:
-                    st.warning("Veuillez remplir tous les champs")
+                            st.warning("Veuillez entrer votre email")
+            else:
+                # Vérification OTP
+                st.info(f"✉️ Code envoyé à: **{st.session_state.login_otp_email}**")
+                with st.form("login_otp_verify_form"):
+                    otp_code = st.text_input("🔢 Code OTP (6 chiffres)", max_chars=6, placeholder="123456")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        verify = st.form_submit_button("✅ Vérifier et se connecter")
+                    with col2:
+                        cancel = st.form_submit_button("❌ Annuler")
+                    
+                    if verify:
+                        if otp_code and len(otp_code) == 6:
+                            with st.spinner("Vérification du code..."):
+                                success, message = auth.verify_otp(st.session_state.login_otp_email, otp_code)
+                                if success:
+                                    st.success(message)
+                                    st.session_state.login_otp_sent = False
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                        else:
+                            st.warning("Veuillez entrer un code à 6 chiffres")
+                    
+                    if cancel:
+                        st.session_state.login_otp_sent = False
+                        st.rerun()
+        else:
+            # Connexion classique
+            with st.form("login_form"):
+                email = st.text_input("📧 Email", placeholder="votre.email@example.com")
+                password = st.text_input("🔒 Mot de passe", type="password")
+                submit = st.form_submit_button("Se connecter")
+                
+                if submit:
+                    if email and password:
+                        with st.spinner("Connexion en cours..."):
+                            success, message = auth.login(email, password)
+                            if success:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    else:
+                        st.warning("Veuillez remplir tous les champs")
     
     elif auth_tab == "📝 Inscription":
         st.markdown("### Créer un compte")
+        
+        # Option: Vérification par email ou OTP
+        verify_method = st.radio(
+            "Méthode de vérification",
+            ["📧 Email classique", "🔐 Code OTP immédiat"],
+            horizontal=True
+        )
+        
         with st.form("register_form"):
             username = st.text_input("👤 Nom d'utilisateur", placeholder="username")
             email = st.text_input("📧 Email", placeholder="votre.email@example.com")
@@ -324,6 +395,16 @@ def show_auth_ui():
             password = st.text_input("🔒 Mot de passe", type="password", 
                                     help="Min 6 caractères, 1 majuscule, 1 minuscule, 1 chiffre")
             password_confirm = st.text_input("🔒 Confirmer le mot de passe", type="password")
+            
+            # Si OTP, ajouter le champ OTP
+            otp_code = None
+            if verify_method == "🔐 Code OTP immédiat":
+                st.markdown("---")
+                st.info("📱 Un code OTP vous sera envoyé pour vérifier votre email")
+                if st.session_state.get('register_otp_sent', False):
+                    otp_code = st.text_input("🔢 Code OTP (6 chiffres)", max_chars=6, placeholder="123456",
+                                            help="Vérifiez votre boîte email")
+            
             submit = st.form_submit_button("S'inscrire")
             
             if submit:
@@ -334,13 +415,48 @@ def show_auth_ui():
                 elif len(password) < 6:
                     st.error("Le mot de passe doit contenir au moins 6 caractères")
                 else:
-                    with st.spinner("Inscription en cours..."):
-                        success, message = auth.register(username, email, password, full_name, organization)
-                        if success:
-                            st.success(message)
-                            st.info("Vérifiez votre email pour activer votre compte")
+                    # Si méthode OTP et code pas encore envoyé
+                    if verify_method == "🔐 Code OTP immédiat" and not st.session_state.get('register_otp_sent', False):
+                        with st.spinner("Inscription et envoi du code OTP..."):
+                            # D'abord s'inscrire
+                            success, message = auth.register(username, email, password, full_name, organization)
+                            if success:
+                                # Puis envoyer l'OTP
+                                otp_success, otp_message = auth.send_otp(email)
+                                if otp_success:
+                                    st.session_state.register_otp_sent = True
+                                    st.session_state.register_email = email
+                                    st.success(f"{message} - {otp_message}")
+                                    st.info("🔢 Entrez maintenant le code reçu par email pour activer votre compte")
+                                    st.rerun()
+                                else:
+                                    st.error(otp_message)
+                            else:
+                                st.error(message)
+                    
+                    # Si méthode OTP et code déjà envoyé, vérifier le code
+                    elif verify_method == "🔐 Code OTP immédiat" and st.session_state.get('register_otp_sent', False):
+                        if otp_code and len(otp_code) == 6:
+                            with st.spinner("Vérification du code OTP..."):
+                                success, message = auth.verify_otp(st.session_state.register_email, otp_code)
+                                if success:
+                                    st.success(f"✅ Compte activé ! {message}")
+                                    st.session_state.register_otp_sent = False
+                                    st.rerun()
+                                else:
+                                    st.error(message)
                         else:
-                            st.error(message)
+                            st.warning("Veuillez entrer le code OTP à 6 chiffres reçu par email")
+                    
+                    # Méthode classique par email
+                    else:
+                        with st.spinner("Inscription en cours..."):
+                            success, message = auth.register(username, email, password, full_name, organization)
+                            if success:
+                                st.success(message)
+                                st.info("📧 Vérifiez votre email pour activer votre compte")
+                            else:
+                                st.error(message)
     
     elif auth_tab == "📱 Connexion OTP":
         st.markdown("### Authentification par OTP")

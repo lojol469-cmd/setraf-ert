@@ -476,10 +476,14 @@ export const sendOTP = async (req, res) => {
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
+    console.log('🔐 OTP généré:', otpCode, 'pour', email); // Debug
+
     // Stocker l'OTP dans l'utilisateur
     user.otpCode = otpCode;
     user.otpExpires = otpExpires;
     await user.save();
+
+    console.log('✅ OTP sauvegardé dans la base de données'); // Debug
 
     // Envoyer l'email
     try {
@@ -523,9 +527,12 @@ export const sendOTP = async (req, res) => {
         `
       });
 
+      console.log('📧 Email OTP envoyé avec succès à:', email); // Debug
+
       res.json({
         success: true,
-        message: 'Code OTP envoyé à votre email'
+        message: 'Code OTP envoyé à votre email',
+        debug: process.env.NODE_ENV === 'development' ? { otpCode } : undefined // Debug en dev uniquement
       });
 
     } catch (emailError) {
@@ -562,7 +569,10 @@ export const verifyOTP = async (req, res) => {
     // Trouver l'utilisateur
     const user = await User.findOne({ email });
 
+    console.log('🔍 Vérification OTP pour:', email); // Debug
+
     if (!user) {
+      console.log('❌ Utilisateur non trouvé'); // Debug
       return res.status(404).json({
         success: false,
         message: 'Utilisateur non trouvé'
@@ -571,14 +581,18 @@ export const verifyOTP = async (req, res) => {
 
     // Vérifier si l'OTP est valide
     if (!user.otpCode || !user.otpExpires) {
+      console.log('❌ Aucun OTP actif dans la BDD'); // Debug
       return res.status(400).json({
         success: false,
         message: 'Aucun code OTP actif. Veuillez en demander un nouveau.'
       });
     }
 
+    console.log('📝 OTP stocké:', user.otpCode, 'OTP reçu:', otp); // Debug
+
     // Vérifier si l'OTP est expiré
     if (Date.now() > user.otpExpires) {
+      console.log('⏰ OTP expiré'); // Debug
       user.otpCode = undefined;
       user.otpExpires = undefined;
       await user.save();
@@ -589,13 +603,16 @@ export const verifyOTP = async (req, res) => {
       });
     }
 
-    // Vérifier le code
-    if (user.otpCode !== otp) {
+    // Vérifier le code (comparaison stricte)
+    if (user.otpCode !== otp.toString()) {
+      console.log('❌ OTP invalide'); // Debug
       return res.status(401).json({
         success: false,
         message: 'Code OTP invalide'
       });
     }
+
+    console.log('✅ OTP valide, connexion de l\'utilisateur'); // Debug
 
     // Code valide - effacer l'OTP et connecter l'utilisateur
     user.otpCode = undefined;
