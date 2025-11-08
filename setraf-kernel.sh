@@ -333,21 +333,245 @@ show_logs() {
     local service=$1
     case $service in
         node|auth)
-            echo -e "${CYAN}📄 Logs Node.js Auth Server:${NC}"
+            echo -e "${CYAN}📄 Logs Node.js Auth Server (Temps réel):${NC}"
+            echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter${NC}"
+            echo ""
             tail -f "$NODE_LOG"
             ;;
         streamlit|app)
-            echo -e "${CYAN}📄 Logs Streamlit App:${NC}"
+            echo -e "${CYAN}📄 Logs Streamlit App (Temps réel):${NC}"
+            echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter${NC}"
+            echo ""
             tail -f "$STREAMLIT_LOG"
             ;;
         kernel|system)
-            echo -e "${CYAN}📄 Logs Kernel:${NC}"
+            echo -e "${CYAN}📄 Logs Kernel (Temps réel):${NC}"
+            echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter${NC}"
+            echo ""
             tail -f "$KERNEL_LOG"
             ;;
+        all)
+            echo -e "${CYAN}📄 Logs de tous les services (Temps réel):${NC}"
+            echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter${NC}"
+            echo ""
+            tail -f "$NODE_LOG" "$STREAMLIT_LOG" "$KERNEL_LOG"
+            ;;
         *)
-            echo -e "${RED}Service inconnu. Utilisez: node, streamlit, ou kernel${NC}"
+            echo -e "${RED}Service inconnu. Utilisez: node, streamlit, kernel, ou all${NC}"
             ;;
     esac
+}
+
+monitor_services() {
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║          📊 SETRAF - Monitoring en Temps Réel               ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter le monitoring${NC}"
+    echo ""
+    
+    while true; do
+        clear
+        echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║          📊 SETRAF - Monitoring en Temps Réel               ║${NC}"
+        echo -e "${CYAN}║          $(date '+%Y-%m-%d %H:%M:%S')                                  ║${NC}"
+        echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        
+        # Statut des services
+        echo -e "${MAGENTA}═══ SERVICES ═══${NC}"
+        echo ""
+        
+        # Node.js
+        if [ -f "$NODE_PID_FILE" ]; then
+            local node_pid=$(cat "$NODE_PID_FILE")
+            if ps -p $node_pid > /dev/null 2>&1; then
+                local node_mem=$(ps -p $node_pid -o rss= 2>/dev/null | awk '{printf "%.1f MB", $1/1024}')
+                local node_cpu=$(ps -p $node_pid -o %cpu= 2>/dev/null | xargs)
+                local node_time=$(ps -p $node_pid -o etime= 2>/dev/null | xargs)
+                echo -e "${GREEN}● Node.js Auth Server${NC}"
+                echo -e "  PID:     ${node_pid}"
+                echo -e "  Status:  ${GREEN}Running${NC}"
+                echo -e "  Uptime:  ${node_time}"
+                echo -e "  CPU:     ${node_cpu}%"
+                echo -e "  Memory:  ${node_mem}"
+                echo -e "  Port:    5000"
+                
+                # Dernière activité
+                local last_request=$(tail -1 "$NODE_LOG" 2>/dev/null | grep -oP '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}' | tail -1)
+                if [ -n "$last_request" ]; then
+                    echo -e "  Last:    ${last_request}"
+                fi
+            else
+                echo -e "${RED}● Node.js Auth Server${NC}"
+                echo -e "  Status:  ${RED}Stopped${NC}"
+            fi
+        else
+            echo -e "${RED}● Node.js Auth Server${NC}"
+            echo -e "  Status:  ${RED}Not started${NC}"
+        fi
+        
+        echo ""
+        
+        # Streamlit
+        if [ -f "$STREAMLIT_PID_FILE" ]; then
+            local streamlit_pid=$(cat "$STREAMLIT_PID_FILE")
+            if ps -p $streamlit_pid > /dev/null 2>&1; then
+                local streamlit_mem=$(ps -p $streamlit_pid -o rss= 2>/dev/null | awk '{printf "%.1f MB", $1/1024}')
+                local streamlit_cpu=$(ps -p $streamlit_pid -o %cpu= 2>/dev/null | xargs)
+                local streamlit_time=$(ps -p $streamlit_pid -o etime= 2>/dev/null | xargs)
+                echo -e "${GREEN}● Streamlit App${NC}"
+                echo -e "  PID:     ${streamlit_pid}"
+                echo -e "  Status:  ${GREEN}Running${NC}"
+                echo -e "  Uptime:  ${streamlit_time}"
+                echo -e "  CPU:     ${streamlit_cpu}%"
+                echo -e "  Memory:  ${streamlit_mem}"
+                echo -e "  Port:    8504"
+            else
+                echo -e "${RED}● Streamlit App${NC}"
+                echo -e "  Status:  ${RED}Stopped${NC}"
+            fi
+        else
+            echo -e "${RED}● Streamlit App${NC}"
+            echo -e "  Status:  ${RED}Not started${NC}"
+        fi
+        
+        echo ""
+        echo -e "${MAGENTA}═══ ACTIVITÉ RÉCENTE ═══${NC}"
+        echo ""
+        
+        # Dernières lignes des logs Node.js
+        echo -e "${CYAN}🔐 Node.js (dernières 3 requêtes):${NC}"
+        tail -3 "$NODE_LOG" 2>/dev/null | grep -E "GET|POST|PUT|DELETE" | tail -3 | sed 's/^/  /' || echo -e "  ${YELLOW}Aucune activité récente${NC}"
+        echo ""
+        
+        # Dernières lignes des logs Streamlit
+        echo -e "${CYAN}💧 Streamlit (derniers événements):${NC}"
+        tail -5 "$STREAMLIT_LOG" 2>/dev/null | grep -v "^$" | tail -3 | sed 's/^/  /' || echo -e "  ${YELLOW}Aucune activité récente${NC}"
+        echo ""
+        
+        # Statistiques système
+        echo -e "${MAGENTA}═══ SYSTÈME ═══${NC}"
+        echo ""
+        
+        # Charge système
+        local load_avg=$(uptime | grep -oP 'load average: \K.*')
+        echo -e "${CYAN}Load Average:${NC} ${load_avg}"
+        
+        # Mémoire
+        local mem_info=$(free -h | grep "Mem:" | awk '{printf "Used: %s / Total: %s (%.0f%%)", $3, $2, ($3/$2)*100}')
+        echo -e "${CYAN}Memory:${NC} ${mem_info}"
+        
+        # Disque
+        local disk_info=$(df -h "$SCRIPT_DIR" | tail -1 | awk '{printf "Used: %s / Total: %s (%s)", $3, $2, $5}')
+        echo -e "${CYAN}Disk:${NC} ${disk_info}"
+        
+        # Connexions réseau
+        local connections=$(netstat -an 2>/dev/null | grep -E ":(5000|8504)" | grep ESTABLISHED | wc -l)
+        echo -e "${CYAN}Active Connections:${NC} ${connections}"
+        
+        echo ""
+        echo -e "${YELLOW}Rafraîchissement dans 5 secondes... (Ctrl+C pour quitter)${NC}"
+        
+        sleep 5
+    done
+}
+
+activity_log() {
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║          📈 SETRAF - Journal d'Activité                     ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    local lines=${1:-50}
+    
+    echo -e "${MAGENTA}═══ Activité Node.js (${lines} dernières) ═══${NC}"
+    echo ""
+    tail -${lines} "$NODE_LOG" 2>/dev/null | grep -E "POST|GET|PUT|DELETE|Connecté|Erreur" | nl
+    
+    echo ""
+    echo -e "${MAGENTA}═══ Activité Streamlit (${lines} dernières) ═══${NC}"
+    echo ""
+    tail -${lines} "$STREAMLIT_LOG" 2>/dev/null | grep -v "^$" | tail -20 | nl
+    
+    echo ""
+    echo -e "${MAGENTA}═══ Événements Kernel (${lines} derniers) ═══${NC}"
+    echo ""
+    tail -${lines} "$KERNEL_LOG" 2>/dev/null | grep -E "INFO|ERROR|WARN" | tail -20 | nl
+}
+
+stats_summary() {
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║          📊 SETRAF - Statistiques                            ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Uptime des services
+    if [ -f "$NODE_PID_FILE" ] && ps -p $(cat "$NODE_PID_FILE") > /dev/null 2>&1; then
+        local node_uptime=$(ps -p $(cat "$NODE_PID_FILE") -o etime= | xargs)
+        echo -e "${GREEN}Node.js Uptime:${NC} ${node_uptime}"
+    fi
+    
+    if [ -f "$STREAMLIT_PID_FILE" ] && ps -p $(cat "$STREAMLIT_PID_FILE") > /dev/null 2>&1; then
+        local streamlit_uptime=$(ps -p $(cat "$STREAMLIT_PID_FILE") -o etime= | xargs)
+        echo -e "${GREEN}Streamlit Uptime:${NC} ${streamlit_uptime}"
+    fi
+    
+    echo ""
+    
+    # Statistiques des logs
+    echo -e "${MAGENTA}═══ Statistiques des Logs ═══${NC}"
+    echo ""
+    
+    local node_lines=$(wc -l < "$NODE_LOG" 2>/dev/null || echo "0")
+    local streamlit_lines=$(wc -l < "$STREAMLIT_LOG" 2>/dev/null || echo "0")
+    local kernel_lines=$(wc -l < "$KERNEL_LOG" 2>/dev/null || echo "0")
+    
+    echo -e "${CYAN}Node.js logs:${NC} ${node_lines} lignes"
+    echo -e "${CYAN}Streamlit logs:${NC} ${streamlit_lines} lignes"
+    echo -e "${CYAN}Kernel logs:${NC} ${kernel_lines} lignes"
+    
+    echo ""
+    
+    # Requêtes API (Node.js)
+    local total_requests=$(grep -c -E "GET|POST|PUT|DELETE" "$NODE_LOG" 2>/dev/null || echo "0")
+    local get_requests=$(grep -c "GET" "$NODE_LOG" 2>/dev/null || echo "0")
+    local post_requests=$(grep -c "POST" "$NODE_LOG" 2>/dev/null || echo "0")
+    
+    echo -e "${MAGENTA}═══ Requêtes API ═══${NC}"
+    echo ""
+    echo -e "${CYAN}Total:${NC} ${total_requests}"
+    echo -e "${CYAN}GET:${NC} ${get_requests}"
+    echo -e "${CYAN}POST:${NC} ${post_requests}"
+    
+    echo ""
+    
+    # Erreurs
+    local node_errors=$(grep -c "ERROR\|Erreur" "$NODE_LOG" 2>/dev/null || echo "0")
+    local streamlit_errors=$(grep -c "error\|Error\|ERROR" "$STREAMLIT_LOG" 2>/dev/null || echo "0")
+    
+    echo -e "${MAGENTA}═══ Erreurs ═══${NC}"
+    echo ""
+    if [ "$node_errors" -gt 0 ] || [ "$streamlit_errors" -gt 0 ]; then
+        echo -e "${YELLOW}Node.js:${NC} ${node_errors} erreur(s)"
+        echo -e "${YELLOW}Streamlit:${NC} ${streamlit_errors} erreur(s)"
+    else
+        echo -e "${GREEN}Aucune erreur détectée${NC}"
+    fi
+    
+    echo ""
+    
+    # Taille des logs
+    echo -e "${MAGENTA}═══ Taille des Logs ═══${NC}"
+    echo ""
+    
+    local node_size=$(du -h "$NODE_LOG" 2>/dev/null | cut -f1)
+    local streamlit_size=$(du -h "$STREAMLIT_LOG" 2>/dev/null | cut -f1)
+    local kernel_size=$(du -h "$KERNEL_LOG" 2>/dev/null | cut -f1)
+    
+    echo -e "${CYAN}Node.js:${NC} ${node_size}"
+    echo -e "${CYAN}Streamlit:${NC} ${streamlit_size}"
+    echo -e "${CYAN}Kernel:${NC} ${kernel_size}"
 }
 
 ###############################################################################
@@ -370,8 +594,34 @@ case "${1:-start}" in
     logs)
         show_logs "${2:-kernel}"
         ;;
+    monitor|watch)
+        monitor_services
+        ;;
+    activity)
+        activity_log "${2:-50}"
+        ;;
+    stats)
+        stats_summary
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs [node|streamlit|kernel]}"
+        echo -e "${CYAN}Usage: $0 {start|stop|restart|status|logs|monitor|activity|stats}${NC}"
+        echo ""
+        echo -e "${YELLOW}Commandes disponibles:${NC}"
+        echo -e "  ${GREEN}start${NC}              - Démarrer les services"
+        echo -e "  ${GREEN}stop${NC}               - Arrêter les services"
+        echo -e "  ${GREEN}restart${NC}            - Redémarrer les services"
+        echo -e "  ${GREEN}status${NC}             - Voir le statut des services"
+        echo -e "  ${GREEN}logs [service]${NC}     - Voir les logs (node|streamlit|kernel|all)"
+        echo -e "  ${GREEN}monitor${NC}            - Monitoring en temps réel"
+        echo -e "  ${GREEN}activity [n]${NC}       - Journal d'activité (n dernières lignes)"
+        echo -e "  ${GREEN}stats${NC}              - Statistiques complètes"
+        echo ""
+        echo -e "${CYAN}Exemples:${NC}"
+        echo -e "  $0 start"
+        echo -e "  $0 logs node"
+        echo -e "  $0 logs all"
+        echo -e "  $0 monitor"
+        echo -e "  $0 activity 100"
         exit 1
         ;;
 esac

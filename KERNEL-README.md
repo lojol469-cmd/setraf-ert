@@ -45,6 +45,32 @@ ou
 ./setraf-kernel.sh restart
 ```
 
+### Monitoring en temps réel ⭐ NOUVEAU
+
+```bash
+# Dashboard complet avec rafraîchissement automatique
+./monitor-setraf.sh
+
+# Ou via le kernel
+./setraf-kernel.sh monitor
+```
+
+### Voir les statistiques ⭐ NOUVEAU
+
+```bash
+./setraf-kernel.sh stats
+```
+
+### Journal d'activité ⭐ NOUVEAU
+
+```bash
+# 50 dernières lignes (par défaut)
+./setraf-kernel.sh activity
+
+# 100 dernières lignes
+./setraf-kernel.sh activity 100
+```
+
 ### Voir les logs en temps réel
 
 ```bash
@@ -56,6 +82,9 @@ ou
 
 # Logs du kernel système
 ./setraf-kernel.sh logs kernel
+
+# Tous les logs en même temps ⭐ NOUVEAU
+./setraf-kernel.sh logs all
 ```
 
 ## 📊 Services
@@ -205,15 +234,46 @@ Assurez-vous que:
 
 ## 🎯 Fonctionnalités du Kernel
 
+### Gestion des Services
 - ✅ Démarrage automatique des deux services
 - ✅ Vérification des dépendances
 - ✅ Gestion des processus (PID)
 - ✅ Logs séparés par service
 - ✅ Archivage automatique des logs
 - ✅ Arrêt propre des services
-- ✅ Statut en temps réel
-- ✅ Supervision des processus
+- ✅ Redémarrage intelligent
+
+### Monitoring et Logs ⭐ NOUVEAU
+- ✅ **Dashboard temps réel** avec rafraîchissement automatique
+  - Statut des services (CPU, RAM, Uptime, Threads)
+  - Activité réseau (connexions actives)
+  - Logs récents des deux services
+  - Ressources système (Load, Memory, Disk)
+  - Statistiques de requêtes et erreurs
+  
+- ✅ **Statistiques complètes**
+  - Uptime des services
+  - Nombre de lignes de logs
+  - Compteur de requêtes API (GET, POST, etc.)
+  - Détection d'erreurs
+  - Taille des fichiers de logs
+  
+- ✅ **Journal d'activité**
+  - Historique des requêtes Node.js
+  - Événements Streamlit
+  - Timeline du kernel
+  - Configurable (n dernières lignes)
+  
+- ✅ **Logs temps réel**
+  - Par service (node, streamlit, kernel)
+  - Vue globale (tous les logs)
+  - Tail -f automatique
+
+### Détection Automatique
+- ✅ Auto-détection IP multi-plateformes
+- ✅ Fallback intelligent sur plusieurs IPs
 - ✅ Interface colorée et claire
+- ✅ Supervision des processus
 
 ## 📝 Notes
 
