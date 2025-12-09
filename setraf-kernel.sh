@@ -149,8 +149,8 @@ start_node_server() {
 }
 
 start_streamlit_server() {
-    log "INFO" "Démarrage du serveur Streamlit..."
-    echo -e "${YELLOW}🚀 Lancement de l'application Streamlit...${NC}"
+    log "INFO" "Démarrage des serveurs Streamlit..."
+    echo -e "${YELLOW}🚀 Lancement des applications Streamlit...${NC}"
     
     cd "$SCRIPT_DIR"
     
@@ -176,24 +176,50 @@ start_streamlit_server() {
     pkill -9 -f "streamlit run" 2>/dev/null || true
     sleep 2
     
-    # Démarrer Streamlit avec l'environnement gestmodo
+    # === DÉMARRER ERTest.py (port 8504) ===
+    echo -e "${CYAN}🌊 Démarrage d'ERTest.py (port 8504)...${NC}"
     nohup $GESTMODO_PYTHON -m streamlit run "$STREAMLIT_APP" --server.port=8504 --server.address=0.0.0.0 > "$STREAMLIT_LOG" 2>&1 &
-    local pid=$!
-    echo $pid > "$STREAMLIT_PID_FILE"
+    local ertest_pid=$!
+    echo $ertest_pid > "$STREAMLIT_PID_FILE"
     
     # Attendre que le serveur démarre
     sleep 5
     
     # Vérifier si le processus tourne
-    if ps -p $pid > /dev/null 2>&1; then
-        log "INFO" "Serveur Streamlit démarré (PID: $pid)"
-        echo -e "${GREEN}✓ Application Streamlit démarrée sur http://172.20.31.35:8504${NC}"
-        return 0
+    if ps -p $ertest_pid > /dev/null 2>&1; then
+        log "INFO" "ERTest.py démarré (PID: $ertest_pid)"
+        echo -e "${GREEN}✓ ERTest.py démarré sur http://172.20.31.35:8504${NC}"
     else
-        log "ERROR" "Échec du démarrage de Streamlit"
-        echo -e "${RED}❌ Échec du démarrage de Streamlit${NC}"
+        log "ERROR" "Échec du démarrage d'ERTest.py"
+        echo -e "${RED}❌ Échec du démarrage d'ERTest.py${NC}"
         tail -20 "$STREAMLIT_LOG"
         return 1
+    fi
+    
+    # === DÉMARRER ERT.py (Kibali avec ERTest intégré, port 8506) ===
+    echo -e "${CYAN}🗺️ Démarrage d'ERT.py - Kibali Analyst (port 8506)...${NC}"
+    local ERT_APP="$SCRIPT_DIR/ERT.py"
+    local ERT_LOG="$LOG_DIR/ert-kibali.log"
+    local ERT_PID_FILE="/tmp/setraf_ert.pid"
+    
+    nohup $GESTMODO_PYTHON -m streamlit run "$ERT_APP" --server.port=8506 --server.address=0.0.0.0 > "$ERT_LOG" 2>&1 &
+    local ert_pid=$!
+    echo $ert_pid > "$ERT_PID_FILE"
+    
+    # Attendre que le serveur démarre
+    sleep 5
+    
+    # Vérifier si le processus tourne
+    if ps -p $ert_pid > /dev/null 2>&1; then
+        log "INFO" "ERT.py (Kibali) démarré (PID: $ert_pid)"
+        echo -e "${GREEN}✓ ERT.py (Kibali) démarré sur http://172.20.31.35:8506${NC}"
+        return 0
+    else
+        log "ERROR" "Échec du démarrage d'ERT.py"
+        echo -e "${RED}❌ Échec du démarrage d'ERT.py${NC}"
+        tail -20 "$ERT_LOG"
+        # Continuer même si ERT échoue (ERTest fonctionne toujours)
+        return 0
     fi
 }
 
@@ -212,20 +238,33 @@ stop_services() {
         rm -f "$NODE_PID_FILE"
     fi
     
-    # Arrêter Streamlit
+    # Arrêter ERTest.py (Streamlit port 8504)
     if [ -f "$STREAMLIT_PID_FILE" ]; then
         local streamlit_pid=$(cat "$STREAMLIT_PID_FILE")
         if ps -p $streamlit_pid > /dev/null 2>&1; then
             kill $streamlit_pid 2>/dev/null || true
-            log "INFO" "Serveur Streamlit arrêté (PID: $streamlit_pid)"
-            echo -e "${GREEN}✓ Application Streamlit arrêtée${NC}"
+            log "INFO" "ERTest.py arrêté (PID: $streamlit_pid)"
+            echo -e "${GREEN}✓ ERTest.py arrêté${NC}"
         fi
         rm -f "$STREAMLIT_PID_FILE"
     fi
     
+    # Arrêter ERT.py (Kibali port 8506)
+    local ERT_PID_FILE="/tmp/setraf_ert.pid"
+    if [ -f "$ERT_PID_FILE" ]; then
+        local ert_pid=$(cat "$ERT_PID_FILE")
+        if ps -p $ert_pid > /dev/null 2>&1; then
+            kill $ert_pid 2>/dev/null || true
+            log "INFO" "ERT.py (Kibali) arrêté (PID: $ert_pid)"
+            echo -e "${GREEN}✓ ERT.py (Kibali) arrêté${NC}"
+        fi
+        rm -f "$ERT_PID_FILE"
+    fi
+    
     # Tuer tous les processus restants
     pkill -f "node.exe server.js" 2>/dev/null || true
-    pkill -f "streamlit run" 2>/dev/null || true
+    pkill -f "streamlit run ERTest.py" 2>/dev/null || true
+    pkill -f "streamlit run ERT.py" 2>/dev/null || true
 }
 
 status_services() {
@@ -251,20 +290,41 @@ status_services() {
     
     echo ""
     
-    # Statut Streamlit
+    # Statut ERTest.py (port 8504)
     if [ -f "$STREAMLIT_PID_FILE" ]; then
         local streamlit_pid=$(cat "$STREAMLIT_PID_FILE")
         if ps -p $streamlit_pid > /dev/null 2>&1; then
-            echo -e "${GREEN}● Streamlit App${NC}"
+            echo -e "${GREEN}● ERTest.py (Standalone)${NC}"
             echo -e "  Status: ${GREEN}Running${NC} (PID: $streamlit_pid)"
             echo -e "  URL: http://172.20.31.35:8504"
             echo -e "  Log: $STREAMLIT_LOG"
         else
-            echo -e "${RED}● Streamlit App${NC}"
+            echo -e "${RED}● ERTest.py${NC}"
             echo -e "  Status: ${RED}Stopped${NC}"
         fi
     else
-        echo -e "${RED}● Streamlit App${NC}"
+        echo -e "${RED}● ERTest.py${NC}"
+        echo -e "  Status: ${RED}Not started${NC}"
+    fi
+    
+    echo ""
+    
+    # Statut ERT.py (Kibali, port 8506)
+    local ERT_PID_FILE="/tmp/setraf_ert.pid"
+    local ERT_LOG="$LOG_DIR/ert-kibali.log"
+    if [ -f "$ERT_PID_FILE" ]; then
+        local ert_pid=$(cat "$ERT_PID_FILE")
+        if ps -p $ert_pid > /dev/null 2>&1; then
+            echo -e "${GREEN}● ERT.py (Kibali Analyst)${NC}"
+            echo -e "  Status: ${GREEN}Running${NC} (PID: $ert_pid)"
+            echo -e "  URL: http://172.20.31.35:8506"
+            echo -e "  Log: $ERT_LOG"
+        else
+            echo -e "${RED}● ERT.py (Kibali)${NC}"
+            echo -e "  Status: ${RED}Stopped${NC}"
+        fi
+    else
+        echo -e "${RED}● ERT.py (Kibali)${NC}"
         echo -e "  Status: ${RED}Not started${NC}"
     fi
 }
@@ -315,7 +375,8 @@ start_services() {
     echo -e "${GREEN}║  ✅ Système SETRAF démarré avec succès !                     ║${NC}"
     echo -e "${GREEN}║                                                               ║${NC}"
     echo -e "${GREEN}║  🔐 Authentification: http://$LOCAL_IP:5000              ║${NC}"
-    echo -e "${GREEN}║  💧 Application SETRAF: http://$LOCAL_IP:8504            ║${NC}"
+    echo -e "${GREEN}║  🌊 ERTest (standalone): http://$LOCAL_IP:8504           ║${NC}"
+    echo -e "${GREEN}║  🗺️ ERT Kibali (complet): http://$LOCAL_IP:8506         ║${NC}"
     echo -e "${GREEN}║                                                               ║${NC}"
     echo -e "${GREEN}║  📝 Logs: $LOG_DIR                        ║${NC}"
     echo -e "${GREEN}║                                                               ║${NC}"
@@ -323,8 +384,9 @@ start_services() {
     echo ""
     echo -e "${CYAN}💡 Accès depuis le réseau local:${NC}"
     echo -e "   - Auth: http://$LOCAL_IP:5000"
-    echo -e "   - App:  http://$LOCAL_IP:8504"
-    echo -e "   - Localhost: http://localhost:8504"
+    echo -e "   - ERTest: http://$LOCAL_IP:8504"
+    echo -e "   - ERT Kibali (avec ERTest intégré): http://$LOCAL_IP:8506"
+    echo -e "   - Localhost: http://localhost:8504 et http://localhost:8506"
     echo ""
     log "INFO" "Système SETRAF opérationnel sur $LOCAL_IP"
 }

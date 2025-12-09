@@ -1,0 +1,14 @@
+# TTS Service Requirements
+# NumPy 1.22.0 strict - versions flexibles
+
+TTS
+gruut
+
+# Audio
+soundfile
+librosa
+pydub
+
+# Utils
+fastapi
+uvicorn[standard]

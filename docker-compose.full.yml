@@ -1,0 +1,121 @@
+# ==========================================
+# SETRAF Complete Stack - Docker Compose
+# Frontend (Streamlit) + Backend (Node.js) + API (FastAPI)
+# ==========================================
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. SETRAF Frontend (Streamlit ERTest.py)
+  # ==========================================
+  setraf-app:
+    image: belikanm/kibaertanalyste:latest
+    container_name: setraf-frontend
+    ports:
+      - "8504:8504"  # Streamlit ERTest.py
+    environment:
+      - PORT=5000
+      - AUTH_PORT=5000
+      - MONGO_URI=${MONGO_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
+    depends_on:
+      - setraf-auth
+    networks:
+      - setraf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8504/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==========================================
+  # 2. SETRAF Backend Auth (Node.js Express)
+  # ==========================================
+  setraf-auth:
+    image: belikanm/setraf-auth:latest
+    container_name: setraf-backend
+    ports:
+      - "5000:5000"  # API REST + WebSocket
+    environment:
+      - NODE_ENV=production
+      - AUTH_PORT=5000
+      - MONGO_URI=${MONGO_URI}
+      - MONGO_USER=${MONGO_USER}
+      - MONGO_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_CLUSTER=${MONGO_CLUSTER}
+      - MONGO_DB_NAME=${MONGO_DB_NAME}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASS=${EMAIL_PASS}
+      - PUBLIC_KEY=${PUBLIC_KEY}
+      - PRIVATE_KEY=${PRIVATE_KEY}
+    volumes:
+      - ./node-auth/logs:/app/logs
+      - ./node-auth/public:/app/public
+    networks:
+      - setraf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==========================================
+  # 3. SETRAF API ERT (FastAPI - Optional)
+  # ==========================================
+  setraf-api:
+    image: belikanm/kibaertanalyste:latest
+    container_name: setraf-api
+    command: ["uvicorn", "api_setraf:app", "--host", "0.0.0.0", "--port", "8505"]
+    ports:
+      - "8505:8505"  # FastAPI
+    environment:
+      - PORT=5000
+      - MONGO_URI=${MONGO_URI}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      - setraf-auth
+    networks:
+      - setraf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8505/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# ==========================================
+# Networks
+# ==========================================
+networks:
+  setraf-network:
+    driver: bridge
+    name: setraf-network
+
+# ==========================================
+# Volumes (optionnel - pour persistence locale)
+# ==========================================
+volumes:
+  setraf-logs:
+    driver: local
+  setraf-data:
+    driver: local
+  setraf-uploads:
+    driver: local
+  setraf-exports:
+    driver: local

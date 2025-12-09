@@ -1,0 +1,79 @@
+# =====================================================
+# SETRAF - Docker Compose Configuration
+# Architecture standalone pour analyse ERT
+# =====================================================
+version: '3.8'
+
+services:
+  # Service principal SETRAF
+  setraf-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: setraf-ert-analyzer
+    image: belikanm/kibaertanalyste:1.0.0
+    ports:
+      - "8504:8504"  # ERTest.py
+      - "8505:8505"  # API FastAPI
+      - "8506:8506"  # ERT.py Kibali
+    environment:
+      - STREAMLIT_SERVER_PORT=8504
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - API_PORT=8505
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
+    networks:
+      - setraf-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8504/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - "com.setraf.service=ert-analyzer"
+      - "com.setraf.version=1.0.0"
+      - "com.setraf.description=Subaquifère ERT Analysis Tool"
+
+  # Service API (optionnel, peut tourner dans le même container)
+  setraf-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: setraf-api
+    image: belikanm/kibaertanalyste:1.0.0
+    ports:
+      - "8505:8505"
+    environment:
+      - API_PORT=8505
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - setraf-network
+    command: ["python", "-m", "uvicorn", "api_setraf:app", "--host", "0.0.0.0", "--port", "8505"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8505/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - setraf-app
+
+networks:
+  setraf-network:
+    driver: bridge
+    name: setraf-network
+
+volumes:
+  setraf-logs:
+    driver: local
+  setraf-data:
+    driver: local

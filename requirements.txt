@@ -36,6 +36,19 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-dotenv>=1.0.0
 
+# Géophysique ERT
+pygimli>=1.5.0
+
+# Traitement d'images et vision
+pillow>=10.0.0
+opencv-python-headless>=4.8.0
+
+# Machine Learning avancé
+tensorflow>=2.15.0
+
+# Widgets interactifs (pour interface avancée)
+ipywidgets>=8.1.0
+
 # Utilitaires
 aiofiles>=23.2.0
 python-dateutil>=2.8.0

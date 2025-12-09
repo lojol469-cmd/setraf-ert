@@ -34,9 +34,15 @@ def get_local_ip():
 # Détection automatique de l'IP
 LOCAL_IP = get_local_ip()
 
-# Configuration de l'API backend avec IP auto-détectée
-BACKEND_URL = f"http://{LOCAL_IP}:{os.getenv('PORT', '5000')}/api"
+# Configuration de l'API backend
+# En production, utiliser l'URL Render
+PRODUCTION_BACKEND = "https://setraf-auth.onrender.com/api"
 LOCAL_BACKEND = f"http://localhost:{os.getenv('PORT', '5000')}/api"
+LOCAL_IP_BACKEND = f"http://{LOCAL_IP}:{os.getenv('PORT', '5000')}/api"
+
+# Déterminer l'environnement
+USE_PRODUCTION = os.getenv('USE_PRODUCTION_BACKEND', 'true').lower() == 'true'
+BACKEND_URL = PRODUCTION_BACKEND if USE_PRODUCTION else LOCAL_BACKEND
 
 class AuthManager:
     """Gestionnaire d'authentification avec OTP"""
@@ -58,29 +64,40 @@ class AuthManager:
         if 'otp_expiry' not in st.session_state:
             st.session_state.otp_expiry = None
     
-    def _get_backend_url(self):
-        """Détermine l'URL backend appropriée avec fallback sur plusieurs IPs"""
-        # Liste des IPs à tester
-        ips_to_try = [
-            "192.168.1.66",  # IP WiFi détectée
-            LOCAL_IP,         # IP auto-détectée
-            "172.20.31.35",   # IP WSL
-            "localhost"       # Fallback final
-        ]
+    def test_connectivity(self):
+        """Teste la connectivité des backends disponibles"""
+        backends = {
+            "Production (Render)": PRODUCTION_BACKEND,
+            "Local": LOCAL_BACKEND,
+            "Local IP": LOCAL_IP_BACKEND
+        }
         
-        port = os.getenv('PORT', '5000')
-        
-        for ip in ips_to_try:
+        results = {}
+        for name, url in backends.items():
             try:
-                url = f"http://{ip}:{port}/api"
-                response = requests.get(f"{url.replace('/api', '')}/api/health", timeout=1)
-                if response.status_code == 200:
-                    return url
+                response = requests.get(f"{url}/health", timeout=3)
+                results[name] = response.status_code == 200
             except:
-                continue
+                results[name] = False
         
-        # Fallback par défaut
-        return f"http://localhost:{port}/api"
+        return results
+    
+    def _get_backend_url(self):
+        """Détermine l'URL backend appropriée avec fallback"""
+        # En production, utiliser toujours Render
+        if USE_PRODUCTION:
+            # Tester la connectivité avant de retourner l'URL
+            try:
+                import requests
+                response = requests.get(f"{PRODUCTION_BACKEND}/health", timeout=3)
+                if response.status_code == 200:
+                    return PRODUCTION_BACKEND
+            except:
+                st.warning("⚠️ Serveur de production inaccessible, basculement sur le serveur local")
+                return LOCAL_BACKEND
+        
+        # Fallback sur backend local
+        return LOCAL_BACKEND
     
     def register(self, username, email, password, full_name, organization=""):
         """Inscription d'un nouvel utilisateur"""
@@ -138,34 +155,28 @@ class AuthManager:
     def send_otp(self, email):
         """Envoyer un code OTP à l'email"""
         try:
-            for i, backend_url in enumerate(self._get_backend_url()):
-                try:
-                    response = requests.post(
-                        f"{backend_url}/api/auth/send-otp",
-                        json={"email": email},
-                        timeout=5
-                    )
+            backend = self._get_backend_url()
+            response = requests.post(
+                f"{backend}/auth/send-otp",
+                json={"email": email},
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('success'):
+                    st.session_state.otp_sent = True
+                    st.session_state.otp_email = email
                     
-                    if response.status_code == 200:
-                        data = response.json()
-                        if data.get('success'):
-                            st.session_state.otp_sent = True
-                            st.session_state.otp_email = email
-                            
-                            # Afficher le code OTP en mode développement
-                            if 'debug' in data and data['debug'] and 'otpCode' in data['debug']:
-                                st.info(f"🔧 MODE DEV - Code OTP: **{data['debug']['otpCode']}**")
-                            
-                            return True, data.get('message', 'Code OTP envoyé')
-                        return False, data.get('message', 'Erreur lors de l\'envoi de l\'OTP')
+                    # Afficher le code OTP en mode développement
+                    if 'debug' in data and data['debug'] and 'otpCode' in data['debug']:
+                        st.info(f"🔧 MODE DEV - Code OTP: **{data['debug']['otpCode']}**")
                     
-                except requests.exceptions.RequestException:
-                    if i < len(list(self._get_backend_url())) - 1:
-                        continue
-                    return False, "Impossible de contacter le serveur d'authentification"
-                    
-        except Exception as e:
-            return False, f"Erreur: {str(e)}"
+                    return True, data.get('message', 'Code OTP envoyé')
+                return False, data.get('message', 'Erreur lors de l\'envoi de l\'OTP')
+            
+        except requests.exceptions.RequestException as e:
+            return False, f"Erreur de connexion au serveur: {str(e)}"
     
     def verify_otp(self, email, otp_code):
         """Vérifier le code OTP"""
