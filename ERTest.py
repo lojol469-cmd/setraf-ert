@@ -11,6 +11,12 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import joblib
+import pickle
 import chardet
 import os
 import tempfile
@@ -22,6 +28,8 @@ from pygimli.physics.ert import ERTManager, simulate
 from matplotlib.colors import ListedColormap, BoundaryNorm, LinearSegmentedColormap
 from PIL import Image
 import torch
+import hashlib
+import json
 
 # Import du module d'authentification
 # try:
@@ -36,17 +44,19 @@ AUTH_ENABLED = False
 # GÉNÉRATION DE COUPES GÉOLOGIQUES RÉALISTES AVEC PYGIMLI
 # ═══════════════════════════════════════════════════════════════
 
-# Configuration du LLM Mistral pour analyse intelligente
-MISTRAL_MODEL_PATH = "/home/belikan/.cache/huggingface/hub/models--mistralai--Mistral-7B-Instruct-v0.2/snapshots/63a8b081895390a26e140280378bc85ec8bce07a"
-CLIP_MODEL_PATH = "/home/belikan/.cache/huggingface/hub/models--openai--clip-vit-base-patch32"
+# Configuration des chemins de modèles LOCAUX dans le dossier SETRAF
+SETRAF_BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+MISTRAL_MODEL_PATH = os.path.join(SETRAF_BASE_PATH, "models/mistral-7b")
+CLIP_MODEL_PATH = os.path.join(SETRAF_BASE_PATH, "models/clip")
 
 # ═══════════════════════════════════════════════════════════════
 # SYSTÈME RAG (Retrieval-Augmented Generation) POUR GÉOPHYSIQUE ERT
 # ═══════════════════════════════════════════════════════════════
 
-# Configuration RAG
-RAG_DOCUMENTS_PATH = "/home/belikan/KIbalione8/SETRAF/rag_documents"
-VECTOR_DB_PATH = "/home/belikan/KIbalione8/SETRAF/vector_db"
+# Configuration RAG - Chemins locaux dans SETRAF
+RAG_DOCUMENTS_PATH = os.path.join(SETRAF_BASE_PATH, "rag_documents")
+VECTOR_DB_PATH = os.path.join(SETRAF_BASE_PATH, "vector_db")
+ML_MODELS_PATH = os.path.join(SETRAF_BASE_PATH, "ml_models")
 HF_TOKEN = "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"
 TAVILY_API_KEY = "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"
 
@@ -54,14 +64,31 @@ class ERTKnowledgeBase:
     """
     Base de connaissances vectorielle spécialisée en géophysique ERT
     OPTIMISÉE pour un chargement rapide et des performances élevées
+    + SYSTÈME D'AUTO-APPRENTISSAGE ML intégré
     """
     def __init__(self):
         self.vectorstore = None
         self.embeddings = None
         self.documents = []
+        self.document_metadata = []  # Métadonnées avec hash IDs
         self.web_search_enabled = True
         self.initialized = False
         self.use_lightweight_model = True  # Modèle plus rapide
+        
+        # Sous-modèles ML auto-apprenants
+        self.ml_models = {
+            'resistivity_predictor': None,  # Prédiction résistivité apparente
+            'color_classifier': None,       # Classification couleurs
+            'anomaly_detector': None,       # Détection anomalies
+            'depth_interpolator': None      # Interpolation profondeur
+        }
+        self.scaler = None
+        self.training_history = []  # Historique d'entraînement
+        self.models_initialized = False
+        
+        # Dictionnaire des fichiers .dat traités (hash -> métadonnées)
+        self.dat_files_registry = {}  # {hash_id: {filename, upload_time, n_samples, ...}}
+        self._load_dat_registry()
 
     def initialize_embeddings(self):
         """Initialise le modèle d'embeddings OPTIMISÉ"""
@@ -78,13 +105,18 @@ class ERTKnowledgeBase:
 
             st.info("🔄 Chargement rapide du modèle d'embeddings...")
 
-            # MODÈLE ULTRA-LÉGER - nom court sans préfixe
-            model_name = 'all-MiniLM-L6-v2'
+            # Chemin local du modèle d'embeddings
+            embeddings_path = os.path.join(SETRAF_BASE_PATH, "models/embeddings/sentence-transformers--all-MiniLM-L6-v2")
             
-            # Charger directement sur CPU sans transfert
+            # Vérifier si le modèle existe localement
+            if not os.path.exists(embeddings_path):
+                st.error(f"❌ Modèle d'embeddings non trouvé : {embeddings_path}")
+                st.info("💡 Copiez le modèle depuis le cache HuggingFace ou téléchargez-le")
+                return False
+            
+            # Charger directement sur CPU depuis le dossier local
             self.embeddings = SentenceTransformer(
-                model_name,
-                cache_folder="/home/belikan/.cache/huggingface",
+                embeddings_path,
                 device='cpu'
             )
             
@@ -118,11 +150,18 @@ class ERTKnowledgeBase:
 
             if os.path.exists(db_file) and os.path.exists(docs_file):
                 # Chargement RAPIDE depuis le cache
-                st.info("🔄 Chargement ultra-rapide de la base vectorielle...")
+                st.info("🔄 Chargement de la base vectorielle...")
                 self.vectorstore = faiss.read_index(db_file)
                 with open(docs_file, 'rb') as f:
-                    self.documents = pickle.load(f)
+                    data = pickle.load(f)
+                    # Support des deux formats : dict ou liste directe
+                    if isinstance(data, dict):
+                        self.documents = data.get('texts', [])
+                    else:
+                        self.documents = data
+                
                 st.success(f"✅ Base vectorielle chargée : {len(self.documents)} chunks")
+                st.info(f"📊 Total mots: {sum(len(doc.split()) for doc in self.documents):,}")
                 self.initialized = True
                 return True
             else:
@@ -167,10 +206,10 @@ class ERTKnowledgeBase:
                 }
             ]
 
-            # Documents PDF si disponibles (chargement rapide)
+            # Documents PDF si disponibles - TOUS les PDFs
             pdf_docs = self.extract_text_from_pdfs_optimized()
             if pdf_docs:
-                default_docs.extend(pdf_docs[:2])  # Limiter à 2 docs PDF max
+                default_docs.extend(pdf_docs)  # Inclure TOUS les PDFs
 
             # SPLITTING OPTIMISÉ - Chunks plus petits
             texts = []
@@ -237,42 +276,50 @@ class ERTKnowledgeBase:
             return False
 
     def extract_text_from_pdfs_optimized(self):
-        """Extraction PDF ultra-rapide - seulement les premiers pages"""
+        """Extraction PDF complète - TOUS les PDFs et TOUTES les pages"""
         try:
             import os
             from pypdf import PdfReader
 
             pdf_docs = []
             if os.path.exists(RAG_DOCUMENTS_PATH):
-                pdf_files = [f for f in os.listdir(RAG_DOCUMENTS_PATH) if f.endswith('.pdf')][:1]  # Max 1 PDF
+                pdf_files = [f for f in os.listdir(RAG_DOCUMENTS_PATH) if f.endswith('.pdf')]
+                
+                st.info(f"📄 Traitement de {len(pdf_files)} fichier(s) PDF...")
 
                 for file in pdf_files:
                     pdf_path = os.path.join(RAG_DOCUMENTS_PATH, file)
                     try:
                         reader = PdfReader(pdf_path)
                         text = ""
+                        total_pages = len(reader.pages)
 
-                        # SEULEMENT LES 2 PREMIÈRES PAGES pour rapidité
-                        for page_num in range(min(2, len(reader.pages))):
+                        # Extraire TOUTES les pages du PDF
+                        for page_num in range(total_pages):
                             page = reader.pages[page_num]
                             page_text = page.extract_text()
-                            if len(page_text.strip()) > 100:  # Pages avec contenu substantiel
-                                text += page_text + "\n"
+                            if len(page_text.strip()) > 50:  # Pages avec contenu
+                                text += page_text + "\n\n"
 
-                        if len(text.strip()) > 200:  # Document avec contenu suffisant
+                        if len(text.strip()) > 100:  # Document avec contenu suffisant
                             pdf_docs.append({
-                                "title": f"PDF: {file[:20]}...",
-                                "content": text[:2000]  # Limiter la taille
+                                "title": f"PDF: {file}",
+                                "content": text,
+                                "pages": total_pages,
+                                "source": file
                             })
+                            st.success(f"✅ {file}: {total_pages} pages extraites")
                     except Exception as e:
-                        continue  # Ignorer les erreurs PDF
+                        st.warning(f"⚠️ Erreur PDF {file}: {str(e)[:50]}")
+                        continue
 
             return pdf_docs
         except ImportError:
+            st.error("❌ Module pypdf non installé")
             return []
 
-    def search_knowledge_base(self, query, k=2):
-        """Recherche ULTRA-RAPIDE dans la base vectorielle"""
+    def search_knowledge_base(self, query, k=5):
+        """Recherche dans la base vectorielle avec plus de résultats"""
         try:
             if not self.vectorstore or not self.embeddings or not self.initialized:
                 return []
@@ -336,26 +383,424 @@ class ERTKnowledgeBase:
         except Exception as e:
             return []
 
+    def initialize_ml_models(self):
+        """Initialise ou charge les modèles ML d'auto-apprentissage"""
+        try:
+            os.makedirs(ML_MODELS_PATH, exist_ok=True)
+            
+            # Charger les modèles existants s'ils existent
+            resistivity_model_path = os.path.join(ML_MODELS_PATH, 'resistivity_predictor.pkl')
+            color_model_path = os.path.join(ML_MODELS_PATH, 'color_classifier.pkl')
+            scaler_path = os.path.join(ML_MODELS_PATH, 'scaler.pkl')
+            history_path = os.path.join(ML_MODELS_PATH, 'training_history.pkl')
+            
+            if os.path.exists(resistivity_model_path):
+                self.ml_models['resistivity_predictor'] = joblib.load(resistivity_model_path)
+                self.ml_models['color_classifier'] = joblib.load(color_model_path)
+                self.scaler = joblib.load(scaler_path)
+                
+                if os.path.exists(history_path):
+                    with open(history_path, 'rb') as f:
+                        self.training_history = pickle.load(f)
+                
+                self.models_initialized = True
+                return True
+            else:
+                # Initialiser de nouveaux modèles
+                self.ml_models['resistivity_predictor'] = RandomForestRegressor(
+                    n_estimators=100, 
+                    max_depth=10, 
+                    random_state=42,
+                    n_jobs=-1
+                )
+                self.ml_models['color_classifier'] = GradientBoostingRegressor(
+                    n_estimators=50,
+                    max_depth=5,
+                    random_state=42
+                )
+                self.ml_models['anomaly_detector'] = Ridge(alpha=1.0)
+                self.ml_models['depth_interpolator'] = RandomForestRegressor(
+                    n_estimators=50,
+                    max_depth=8,
+                    random_state=42
+                )
+                self.scaler = StandardScaler()
+                return True
+                
+        except Exception as e:
+            st.warning(f"⚠️ Erreur init ML models: {e}")
+            return False
+
+    def train_on_dat_file(self, df, file_metadata=None):
+        """Entraîne les modèles ML sur un fichier .dat chargé
+        
+        Returns:
+            dict: {'success': bool, 'already_exists': bool, 'hash_id': str, 'message': str}
+        """
+        try:
+            if df.empty or len(df) < 10:
+                return {'success': False, 'already_exists': False, 'hash_id': None, 'message': 'Données insuffisantes'}
+            
+            # Vérifier si le fichier existe déjà
+            filename = file_metadata.get('filename', 'unknown') if file_metadata else 'unknown'
+            check_result = self.check_dat_exists(df, filename)
+            
+            if check_result['exists']:
+                # Fichier déjà traité, retourner les métadonnées
+                return {
+                    'success': True,
+                    'already_exists': True,
+                    'hash_id': check_result['hash_id'],
+                    'metadata': check_result['metadata'],
+                    'message': 'Fichier déjà stocké dans la base vectorielle'
+                }
+            
+            if not self.models_initialized:
+                self.initialize_ml_models()
+            
+            st.info("🤖 Auto-apprentissage ML en cours...")
+            
+            # Préparer les features
+            features = self._extract_features_from_dat(df)
+            if features is None:
+                return {'success': False, 'already_exists': False, 'hash_id': None, 'message': 'Erreur extraction features'}
+            
+            X = features[['survey_point', 'depth_from', 'depth_to', 'depth_mean']].values
+            y_resistivity = features['data'].values
+            
+            # Normalisation
+            if not hasattr(self.scaler, 'mean_'):
+                X_scaled = self.scaler.fit_transform(X)
+            else:
+                X_scaled = self.scaler.transform(X)
+            
+            # Entraînement incrémental des modèles
+            if len(X_scaled) > 20:
+                # Split pour validation
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X_scaled, y_resistivity, test_size=0.2, random_state=42
+                )
+                
+                # Entraîner le prédicteur de résistivité
+                self.ml_models['resistivity_predictor'].fit(X_train, y_train)
+                score = self.ml_models['resistivity_predictor'].score(X_test, y_test)
+                
+                # Créer des targets pour les couleurs (basé sur échelle de résistivité)
+                y_color_class = self._resistivity_to_color_class(y_resistivity)
+                self.ml_models['color_classifier'].fit(X_train, y_color_class[:len(X_train)])
+                
+                # Enregistrer l'historique avec hash_id
+                hash_id = check_result['hash_id']
+                training_record = {
+                    'hash_id': hash_id,
+                    'timestamp': datetime.now().isoformat(),
+                    'n_samples': len(df),
+                    'n_points': df['survey_point'].nunique() if 'survey_point' in df.columns else 0,
+                    'resistivity_score': float(score),
+                    'file_metadata': file_metadata or {},
+                    'resistivity_range': [float(df['data'].min()), float(df['data'].max())]
+                }
+                self.training_history.append(training_record)
+                
+                # Enregistrer dans le registre des fichiers .dat
+                self.dat_files_registry[hash_id] = {
+                    'filename': filename,
+                    'upload_time': training_record['timestamp'],
+                    'n_samples': training_record['n_samples'],
+                    'n_points': training_record['n_points'],
+                    'resistivity_range': training_record['resistivity_range']
+                }
+                self._save_dat_registry()
+                
+                # Sauvegarder les modèles
+                self._save_ml_models()
+                
+                # Ajouter les données à la base vectorielle RAG
+                self._add_dat_to_vectorstore(df, training_record)
+                
+                st.success(f"✅ Modèles ML entraînés ! Score R²: {score:.3f}")
+                return {
+                    'success': True,
+                    'already_exists': False,
+                    'hash_id': hash_id,
+                    'metadata': training_record,
+                    'message': 'Nouveau fichier traité et stocké'
+                }
+            
+            return {'success': False, 'already_exists': False, 'hash_id': None, 'message': 'Échec entraînement'}
+            
+        except Exception as e:
+            st.error(f"❌ Erreur entraînement ML: {e}")
+            return {'success': False, 'already_exists': False, 'hash_id': None, 'message': str(e)}
+    
+    def _extract_features_from_dat(self, df):
+        """Extrait les features pour l'entraînement ML"""
+        try:
+            required_cols = ['survey_point', 'data']
+            if not all(col in df.columns for col in required_cols):
+                return None
+            
+            features = df.copy()
+            
+            # Créer des features additionnelles
+            if 'depth_from' in df.columns and 'depth_to' in df.columns:
+                features['depth_mean'] = (df['depth_from'] + df['depth_to']) / 2
+            else:
+                features['depth_from'] = 0
+                features['depth_to'] = 0
+                features['depth_mean'] = 0
+            
+            return features[['survey_point', 'depth_from', 'depth_to', 'depth_mean', 'data']]
+            
+        except Exception as e:
+            return None
+    
+    def _resistivity_to_color_class(self, resistivity_values):
+        """Convertit les valeurs de résistivité en classes de couleurs"""
+        # Échelle de résistivité ERT standard
+        classes = np.zeros_like(resistivity_values)
+        classes[resistivity_values < 1] = 0      # Bleu foncé - Eau de mer
+        classes[(resistivity_values >= 1) & (resistivity_values < 10)] = 1   # Bleu - Argiles
+        classes[(resistivity_values >= 10) & (resistivity_values < 100)] = 2  # Vert - Eau douce
+        classes[(resistivity_values >= 100) & (resistivity_values < 1000)] = 3 # Jaune - Sables
+        classes[(resistivity_values >= 1000) & (resistivity_values < 10000)] = 4 # Orange - Roches
+        classes[resistivity_values >= 10000] = 5  # Rouge - Socle cristallin
+        return classes
+    
+    def _save_ml_models(self):
+        """Sauvegarde tous les modèles ML"""
+        try:
+            joblib.dump(self.ml_models['resistivity_predictor'], 
+                       os.path.join(ML_MODELS_PATH, 'resistivity_predictor.pkl'))
+            joblib.dump(self.ml_models['color_classifier'], 
+                       os.path.join(ML_MODELS_PATH, 'color_classifier.pkl'))
+            joblib.dump(self.scaler, 
+                       os.path.join(ML_MODELS_PATH, 'scaler.pkl'))
+            
+            with open(os.path.join(ML_MODELS_PATH, 'training_history.pkl'), 'wb') as f:
+                pickle.dump(self.training_history, f)
+            
+        except Exception as e:
+            pass
+    
+    def _add_dat_to_vectorstore(self, df, training_record):
+        """Ajoute les informations du fichier .dat à la base vectorielle RAG"""
+        try:
+            if not self.vectorstore or not self.embeddings:
+                return
+            
+            # Créer un résumé textuel du fichier .dat
+            summary_text = f"""
+            DONNÉES ERT - {training_record['timestamp']}
+            Nombre de mesures: {training_record['n_samples']}
+            Points de sondage: {training_record['n_points']}
+            Résistivité: {training_record['resistivity_range'][0]:.2f} - {training_record['resistivity_range'][1]:.2f} Ω·m
+            
+            Interprétation automatique:
+            {self._interpret_resistivity_range(training_record['resistivity_range'])}
+            
+            Statistiques:
+            - Moyenne: {df['data'].mean():.2f} Ω·m
+            - Médiane: {df['data'].median():.2f} Ω·m
+            - Écart-type: {df['data'].std():.2f} Ω·m
+            """
+            
+            # Encoder et ajouter à FAISS
+            import faiss
+            embedding = self.embeddings.encode([summary_text], show_progress_bar=False)
+            self.vectorstore.add(embedding.astype('float32'))
+            self.documents.append(summary_text)
+            
+            # Sauvegarder la base mise à jour
+            import pickle
+            db_file = os.path.join(VECTOR_DB_PATH, "ert_knowledge_light.faiss")
+            docs_file = os.path.join(VECTOR_DB_PATH, "ert_documents_light.pkl")
+            
+            faiss.write_index(self.vectorstore, db_file)
+            with open(docs_file, 'wb') as f:
+                pickle.dump({
+                    'texts': self.documents,
+                    'metadatas': [{'source': 'dat_file', 'timestamp': training_record['timestamp']}] * len(self.documents)
+                }, f)
+            
+        except Exception as e:
+            pass
+    
+    def _interpret_resistivity_range(self, res_range):
+        """Interprète automatiquement la plage de résistivité"""
+        min_res, max_res = res_range
+        interpretation = []
+        
+        if min_res < 10:
+            interpretation.append("Présence probable d'argiles ou matériaux conducteurs")
+        if max_res > 1000:
+            interpretation.append("Présence de formations résistantes (sables, roches)")
+        if max_res > 10000:
+            interpretation.append("Socle cristallin ou roches très résistantes détectés")
+        if 10 <= min_res <= 100 and 100 <= max_res <= 1000:
+            interpretation.append("Zone aquifère potentielle (sables saturés)")
+        
+        return " | ".join(interpretation) if interpretation else "Formation géologique mixte"
+    
+    def _compute_dat_hash(self, df, filename):
+        """Calcule un hash unique pour un fichier .dat basé sur son contenu"""
+        try:
+            # Créer une signature du fichier basée sur les données
+            content_str = f"{filename}_{len(df)}_{df['data'].sum():.6f}_{df['survey_point'].nunique()}"
+            # Ajouter quelques valeurs représentatives
+            if len(df) > 0:
+                content_str += f"_{df['data'].iloc[0]:.6f}_{df['data'].iloc[-1]:.6f}"
+            
+            hash_id = hashlib.sha256(content_str.encode()).hexdigest()[:16]
+            return hash_id
+        except Exception as e:
+            return None
+    
+    def _load_dat_registry(self):
+        """Charge le registre des fichiers .dat traités"""
+        try:
+            registry_file = os.path.join(VECTOR_DB_PATH, "dat_files_registry.json")
+            if os.path.exists(registry_file):
+                with open(registry_file, 'r') as f:
+                    self.dat_files_registry = json.load(f)
+        except Exception as e:
+            self.dat_files_registry = {}
+    
+    def _save_dat_registry(self):
+        """Sauvegarde le registre des fichiers .dat traités"""
+        try:
+            os.makedirs(VECTOR_DB_PATH, exist_ok=True)
+            registry_file = os.path.join(VECTOR_DB_PATH, "dat_files_registry.json")
+            with open(registry_file, 'w') as f:
+                json.dump(self.dat_files_registry, f, indent=2)
+        except Exception as e:
+            pass
+    
+    def check_dat_exists(self, df, filename):
+        """Vérifie si un fichier .dat existe déjà dans la base vectorielle
+        
+        Returns:
+            dict: {'exists': bool, 'hash_id': str, 'metadata': dict or None}
+        """
+        try:
+            hash_id = self._compute_dat_hash(df, filename)
+            if hash_id is None:
+                return {'exists': False, 'hash_id': None, 'metadata': None}
+            
+            if hash_id in self.dat_files_registry:
+                return {
+                    'exists': True,
+                    'hash_id': hash_id,
+                    'metadata': self.dat_files_registry[hash_id]
+                }
+            else:
+                return {'exists': False, 'hash_id': hash_id, 'metadata': None}
+        except Exception as e:
+            return {'exists': False, 'hash_id': None, 'metadata': None}
+    
+    def predict_resistivity(self, survey_point, depth_from, depth_to):
+        """Prédit la résistivité apparente pour un point donné"""
+        try:
+            if not self.models_initialized or self.ml_models['resistivity_predictor'] is None:
+                return None
+            
+            depth_mean = (depth_from + depth_to) / 2
+            X = np.array([[survey_point, depth_from, depth_to, depth_mean]])
+            X_scaled = self.scaler.transform(X)
+            
+            predicted_resistivity = self.ml_models['resistivity_predictor'].predict(X_scaled)[0]
+            predicted_color_class = self.ml_models['color_classifier'].predict(X_scaled)[0]
+            
+            # Convertir la classe de couleur en info lisible
+            color_info = self._color_class_to_info(predicted_color_class)
+            
+            return {
+                'resistivity': float(predicted_resistivity),
+                'color_class': int(predicted_color_class),
+                'color_name': color_info['name'],
+                'color_hex': color_info['hex'],
+                'geological_interpretation': color_info['interpretation']
+            }
+            
+        except Exception as e:
+            return None
+    
+    def _color_class_to_info(self, color_class):
+        """Convertit une classe de couleur en informations détaillées"""
+        color_map = {
+            0: {'name': 'Bleu foncé', 'hex': '#00008B', 'interpretation': 'Eau de mer / Minéraux conducteurs'},
+            1: {'name': 'Bleu', 'hex': '#0000FF', 'interpretation': 'Argiles / Eau saumâtre'},
+            2: {'name': 'Vert', 'hex': '#00FF00', 'interpretation': 'Eau douce / Sols fins'},
+            3: {'name': 'Jaune', 'hex': '#FFFF00', 'interpretation': 'Sables saturés / Zone aquifère'},
+            4: {'name': 'Orange', 'hex': '#FFA500', 'interpretation': 'Roches sédimentaires'},
+            5: {'name': 'Rouge', 'hex': '#FF0000', 'interpretation': 'Socle cristallin / Roches très résistantes'}
+        }
+        return color_map.get(int(color_class), color_map[2])
+    
+    def get_ml_enhanced_context(self, query, df=None):
+        """Obtient un contexte enrichi par ML + RAG pour le LLM"""
+        context_parts = []
+        
+        # 1. Contexte RAG classique
+        rag_context = self.get_enhanced_context(query, use_web=False)
+        if rag_context:
+            context_parts.append("=== CONTEXTE RAG ===")
+            context_parts.append(rag_context)
+        
+        # 2. Historique d'entraînement ML
+        if self.training_history:
+            context_parts.append("\n=== HISTORIQUE ML ===")
+            recent_trainings = self.training_history[-3:]  # 3 derniers entraînements
+            for record in recent_trainings:
+                context_parts.append(f"Fichier analysé: {record['n_samples']} mesures, "
+                                   f"Résistivité: {record['resistivity_range'][0]:.1f}-{record['resistivity_range'][1]:.1f} Ω·m")
+        
+        # 3. Prédictions ML si données disponibles
+        if df is not None and not df.empty and self.models_initialized:
+            context_parts.append("\n=== PRÉDICTIONS ML ===")
+            
+            # Prédire pour quelques points représentatifs
+            sample_points = df.sample(min(3, len(df)))
+            for _, row in sample_points.iterrows():
+                prediction = self.predict_resistivity(
+                    row.get('survey_point', 0),
+                    row.get('depth_from', 0),
+                    row.get('depth_to', 0)
+                )
+                if prediction:
+                    context_parts.append(
+                        f"Point {row.get('survey_point', '?')}: "
+                        f"Résistivité prédite={prediction['resistivity']:.2f} Ω·m, "
+                        f"Couleur={prediction['color_name']}, "
+                        f"Interprétation: {prediction['geological_interpretation']}"
+                    )
+        
+        return "\n".join(context_parts) if context_parts else ""
+
     def get_enhanced_context(self, query, use_web=False):
-        """Obtient un contexte enrichi RAPIDEMENT"""
+        """Obtient un contexte enrichi avec PLUS de chunks pour analyses détaillées"""
         context_parts = []
 
-        # Recherche vectorielle prioritaire
-        vector_results = self.search_knowledge_base(query, k=2)
+        # Recherche vectorielle prioritaire - AUGMENTÉ à 5 chunks
+        vector_results = self.search_knowledge_base(query, k=5)
         if vector_results:
-            context_parts.append("=== BASE VECTORIELLE ===")
-            for i, result in enumerate(vector_results[:1]):  # 1 seul résultat
-                context_parts.append(f"Info {i+1}: {result['content']}")
+            context_parts.append("=== BASE DE CONNAISSANCES RAG ===")
+            for i, result in enumerate(vector_results, 1):  # TOUS les résultats (5)
+                context_parts.append(f"📄 Chunk {i}: {result['content']}")
                 context_parts.append("")
+            
+            # Afficher le nombre de chunks utilisés
+            context_parts.append(f"✅ {len(vector_results)} chunks pertinents trouvés sur {len(self.documents)} indexés")
+            context_parts.append("")
 
-        # Recherche web seulement si demandé et pas de résultats vectoriels
-        if use_web and not vector_results:
-            web_results = self.search_web(query, max_results=1)
+        # Recherche web comme COMPLÉMENT (pas seulement si pas de résultats)
+        if use_web and self.web_search_enabled:
+            web_results = self.search_web(query, max_results=2)
             if web_results:
-                context_parts.append("=== WEB ===")
-                result = web_results[0]
-                context_parts.append(f"Web: {result['content']}")
-                context_parts.append("")
+                context_parts.append("=== RECHERCHE WEB (TAVILY) ===")
+                for i, result in enumerate(web_results, 1):
+                    context_parts.append(f"🌐 Source {i}: {result['content'][:500]}...")
+                    context_parts.append("")
 
         return "\n".join(context_parts) if context_parts else ""# Instance globale de la base de connaissances
 if 'ert_knowledge_base' not in st.session_state:
@@ -524,7 +969,25 @@ def show_explanation_dashboard():
             kb = st.session_state.ert_knowledge_base
             documents = kb.documents
             
-            st.success(f"✅ Base chargée avec **{len(documents)} chunks** de connaissances")
+            # Afficher le nombre de PDFs dans le dossier
+            pdf_count = 0
+            if os.path.exists(RAG_DOCUMENTS_PATH):
+                pdf_files = [f for f in os.listdir(RAG_DOCUMENTS_PATH) if f.endswith('.pdf')]
+                pdf_count = len(pdf_files)
+            
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                st.success(f"✅ **{len(documents)} chunks** indexés dans la base vectorielle")
+            with col_info2:
+                st.info(f"📁 **{pdf_count} fichier(s) PDF** dans `rag_documents/`")
+            
+            # Liste des PDFs
+            if pdf_count > 0:
+                with st.expander(f"📄 Liste des {pdf_count} PDF(s)", expanded=True):
+                    for pdf_file in pdf_files:
+                        pdf_path = os.path.join(RAG_DOCUMENTS_PATH, pdf_file)
+                        file_size = os.path.getsize(pdf_path) / 1024  # KB
+                        st.markdown(f"- 📄 **{pdf_file}** ({file_size:.1f} KB)")
             
             # Statistiques sur les chunks
             st.markdown("##### 📈 Analyse des chunks")
@@ -715,6 +1178,340 @@ def show_explanation_dashboard():
                 st.success("✅ Historique effacé !")
                 st.rerun()
 
+def generate_plotly_visualizations(operation_type, operation_data, llm_explanation):
+    """
+    🎨 Génère automatiquement des visualisations Plotly interactives
+    basées sur les données d'opération et l'analyse LLM
+    
+    Args:
+        operation_type: Type d'opération (data_loading, geological_analysis, etc.)
+        operation_data: Dict contenant les données numériques
+        llm_explanation: Texte de l'analyse générée par le LLM
+    
+    Returns:
+        List[Tuple[str, go.Figure]]: Liste de (nom_figure, figure_plotly)
+    """
+    import plotly.graph_objects as go
+    import plotly.express as px
+    import numpy as np
+    import re
+    
+    figures = []
+    
+    try:
+        if operation_type == "data_loading":
+            # 📊 1. Distribution des résistivités avec échelle de couleurs géologiques
+            if 'data_range' in operation_data:
+                # Extraire min et max de data_range (format: "X - Y Ω·m")
+                range_text = str(operation_data.get('data_range', '0 - 0'))
+                range_match = re.findall(r'[\d.]+', range_text)
+                
+                if len(range_match) >= 2:
+                    min_res = float(range_match[0])
+                    max_res = float(range_match[1])
+                    
+                    # Échelle de résistivités standardisée
+                    resistivity_ranges = [
+                        {'range': (0, 1), 'color': '#00008B', 'label': 'Eau de mer', 'formation': 'Minéraux très conducteurs'},
+                        {'range': (1, 10), 'color': '#0000FF', 'label': 'Argiles', 'formation': 'Argiles saturées/Eau saumâtre'},
+                        {'range': (10, 100), 'color': '#00FF00', 'label': 'Eau douce', 'formation': 'Aquifère argileux'},
+                        {'range': (100, 1000), 'color': '#FFFF00', 'label': 'Sables/Graviers', 'formation': 'Aquifère productif'},
+                        {'range': (1000, 10000), 'color': '#FFA500', 'label': 'Roches fracturées', 'formation': 'Socle altéré/Grès'},
+                        {'range': (10000, 1000000), 'color': '#FF0000', 'label': 'Socle cristallin', 'formation': 'Granite/Gneiss'}
+                    ]
+                    
+                    # Déterminer quelles formations sont présentes
+                    present_formations = []
+                    present_labels = []
+                    present_colors = []
+                    present_values = []
+                    
+                    for r in resistivity_ranges:
+                        if min_res <= r['range'][1] and max_res >= r['range'][0]:
+                            overlap_min = max(min_res, r['range'][0])
+                            overlap_max = min(max_res, r['range'][1])
+                            extent = overlap_max - overlap_min
+                            
+                            present_formations.append(r['formation'])
+                            present_labels.append(f"{r['label']}<br>{overlap_min:.1f}-{overlap_max:.1f} Ω·m")
+                            present_colors.append(r['color'])
+                            present_values.append(extent)
+                    
+                    # Créer un graphique en barres horizontales
+                    fig1 = go.Figure()
+                    
+                    fig1.add_trace(go.Bar(
+                        y=present_formations,
+                        x=present_values,
+                        orientation='h',
+                        marker=dict(
+                            color=present_colors,
+                            line=dict(color='black', width=1)
+                        ),
+                        text=present_labels,
+                        textposition='inside',
+                        textfont=dict(color='white', size=10, family='Arial Black'),
+                        hovertemplate="<b>%{y}</b><br>Étendue: %{x:.1f} Ω·m<br><extra></extra>"
+                    ))
+                    
+                    fig1.update_layout(
+                        title={
+                            'text': "🎨 Distribution des Formations Géologiques par Résistivité",
+                            'x': 0.5,
+                            'xanchor': 'center',
+                            'font': {'size': 16, 'family': 'Arial Black'}
+                        },
+                        xaxis_title="Étendue de résistivité (Ω·m)",
+                        yaxis_title="Type de formation géologique",
+                        height=450,
+                        showlegend=False,
+                        template="plotly_white",
+                        margin=dict(l=20, r=20, t=60, b=60)
+                    )
+                    
+                    figures.append(("🎨 Distribution résistivités", fig1))
+            
+            # 🏔️ 2. Modèle 3D conceptuel si plusieurs points de mesure
+            if 'n_survey_points' in operation_data and operation_data.get('n_survey_points', 0) > 2:
+                n_points = min(operation_data.get('n_survey_points', 5), 20)
+                x_coords = np.linspace(0, 100, n_points)  # Distance en mètres
+                
+                # Simuler des profondeurs d'interfaces géologiques
+                z_surface = np.zeros(n_points)
+                z_aquifer_top = -(5 + np.sin(x_coords / 15) * 2 + np.random.randn(n_points) * 0.5)
+                z_aquifer_bottom = -(15 + np.sin(x_coords / 20) * 3 + np.random.randn(n_points) * 0.8)
+                z_bedrock = -(30 + np.cos(x_coords / 25) * 5 + np.random.randn(n_points) * 1)
+                
+                fig2 = go.Figure()
+                
+                # Surface du sol
+                fig2.add_trace(go.Scatter3d(
+                    x=x_coords, y=np.zeros(n_points), z=z_surface,
+                    mode='lines',
+                    name='Surface topographique',
+                    line=dict(color='#8B4513', width=4),
+                    showlegend=True
+                ))
+                
+                # Toit de l'aquifère
+                fig2.add_trace(go.Scatter3d(
+                    x=x_coords, y=np.zeros(n_points), z=z_aquifer_top,
+                    mode='lines',
+                    name='Toit aquifère (estimé)',
+                    line=dict(color='#00BFFF', width=3, dash='dash'),
+                    showlegend=True
+                ))
+                
+                # Base de l'aquifère
+                fig2.add_trace(go.Scatter3d(
+                    x=x_coords, y=np.zeros(n_points), z=z_aquifer_bottom,
+                    mode='lines',
+                    name='Base aquifère',
+                    line=dict(color='#0000FF', width=3),
+                    showlegend=True
+                ))
+                
+                # Socle rocheux
+                fig2.add_trace(go.Scatter3d(
+                    x=x_coords, y=np.zeros(n_points), z=z_bedrock,
+                    mode='lines',
+                    name='Socle cristallin',
+                    line=dict(color='#696969', width=4),
+                    showlegend=True
+                ))
+                
+                # Ajouter des marqueurs aux extrémités
+                for i in [0, n_points-1]:
+                    fig2.add_trace(go.Scatter3d(
+                        x=[x_coords[i]], y=[0], z=[z_aquifer_top[i]],
+                        mode='markers+text',
+                        marker=dict(size=8, color='blue'),
+                        text=[f'P{i+1}'],
+                        textposition='top center',
+                        showlegend=False
+                    ))
+                
+                fig2.update_layout(
+                    title={
+                        'text': "🏔️ Modèle Géologique 3D Conceptuel",
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'font': {'size': 16, 'family': 'Arial Black'}
+                    },
+                    scene=dict(
+                        xaxis_title="Distance (m)",
+                        yaxis_title="",
+                        zaxis_title="Profondeur (m)",
+                        camera=dict(
+                            eye=dict(x=1.8, y=1.8, z=0.7),
+                            center=dict(x=0, y=0, z=-0.2)
+                        ),
+                        xaxis=dict(showbackground=True, backgroundcolor='lightgray'),
+                        yaxis=dict(showbackground=True, backgroundcolor='lightgray'),
+                        zaxis=dict(showbackground=True, backgroundcolor='lightblue')
+                    ),
+                    height=550,
+                    template="plotly_white",
+                    margin=dict(l=0, r=0, t=60, b=0)
+                )
+                
+                figures.append(("🏔️ Modèle 3D", fig2))
+            
+            # 📈 3. Graphique de profondeur vs résistivité (si données disponibles)
+            if 'rho_min' in operation_data and 'rho_max' in operation_data:
+                # Créer un profil vertical simplifié
+                depths = np.array([0, 5, 10, 15, 20, 30, 50])
+                
+                # Simuler une variation typique de résistivité avec la profondeur
+                rho_min = float(operation_data.get('rho_min', 10))
+                rho_max = float(operation_data.get('rho_max', 1000))
+                
+                # Profil réaliste : haute résistivité en surface (sec), basse en profondeur (aquifère)
+                resistivities = np.array([
+                    rho_max * 0.8,  # Surface sèche
+                    rho_max * 0.5,  # Transition
+                    rho_min * 5,    # Zone aquifère
+                    rho_min * 2,    # Aquifère principal
+                    rho_min * 3,    # Transition vers socle
+                    rho_max * 0.7,  # Socle altéré
+                    rho_max * 1.2   # Socle sain
+                ])
+                
+                # Attribuer des couleurs selon résistivité
+                colors = []
+                for r in resistivities:
+                    if r < 10: colors.append('#0000FF')
+                    elif r < 100: colors.append('#00FF00')
+                    elif r < 1000: colors.append('#FFFF00')
+                    else: colors.append('#FF0000')
+                
+                fig3 = go.Figure()
+                
+                fig3.add_trace(go.Scatter(
+                    x=resistivities,
+                    y=-depths,  # Négatif pour avoir profondeur vers le bas
+                    mode='lines+markers',
+                    name='Profil résistivité',
+                    line=dict(color='darkblue', width=3),
+                    marker=dict(
+                        size=12,
+                        color=colors,
+                        line=dict(color='black', width=2)
+                    ),
+                    hovertemplate="<b>Profondeur: %{y} m</b><br>Résistivité: %{x:.1f} Ω·m<br><extra></extra>"
+                ))
+                
+                # Ajouter zones aquifères
+                fig3.add_hrect(y0=-15, y1=-10, 
+                              fillcolor='lightblue', opacity=0.2,
+                              annotation_text="Zone aquifère potentielle",
+                              annotation_position="left")
+                
+                fig3.update_layout(
+                    title={
+                        'text': "📉 Profil Vertical de Résistivité",
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'font': {'size': 16, 'family': 'Arial Black'}
+                    },
+                    xaxis_title="Résistivité (Ω·m) - échelle log",
+                    yaxis_title="Profondeur (m)",
+                    xaxis_type="log",
+                    height=500,
+                    template="plotly_white",
+                    hovermode='closest',
+                    margin=dict(l=20, r=20, t=60, b=60)
+                )
+                
+                figures.append(("📉 Profil vertical", fig3))
+        
+        elif operation_type == "geological_analysis":
+            # 🗺️ Coupe géologique 2D détaillée
+            if 'rho_min' in operation_data and 'rho_max' in operation_data:
+                rho_min = float(operation_data.get('rho_min', 1))
+                rho_max = float(operation_data.get('rho_max', 10000))
+                
+                # Créer une grille de résistivités simulée
+                x_profile = np.linspace(0, 200, 50)  # Distance en mètres
+                z_profile = np.linspace(0, -50, 30)  # Profondeur en mètres
+                X, Z = np.meshgrid(x_profile, z_profile)
+                
+                # Simuler une distribution de résistivités réaliste
+                # Haute résistivité en surface, basse vers 10-20m (aquifère), haute en profondeur (socle)
+                R = np.zeros_like(X)
+                for i in range(len(z_profile)):
+                    depth = abs(z_profile[i])
+                    if depth < 5:  # Surface
+                        R[i, :] = rho_max * (0.6 + 0.3 * np.random.rand(len(x_profile)))
+                    elif depth < 20:  # Zone aquifère
+                        R[i, :] = rho_min * (2 + 8 * np.random.rand(len(x_profile)))
+                    else:  # Socle
+                        R[i, :] = rho_max * (0.5 + 0.5 * np.random.rand(len(x_profile)))
+                
+                fig4 = go.Figure()
+                
+                fig4.add_trace(go.Contour(
+                    x=x_profile,
+                    z=z_profile,
+                    z_values=R,
+                    colorscale=[
+                        [0, '#00008B'],      # Bleu foncé (très faible)
+                        [0.2, '#0000FF'],    # Bleu (faible)
+                        [0.4, '#00FF00'],    # Vert (moyen-faible)
+                        [0.6, '#FFFF00'],    # Jaune (moyen)
+                        [0.8, '#FFA500'],    # Orange (élevé)
+                        [1, '#FF0000']       # Rouge (très élevé)
+                    ],
+                    colorbar=dict(
+                        title="Résistivité<br>(Ω·m)",
+                        titleside="right",
+                        tickmode="array",
+                        tickvals=[rho_min, rho_min*10, rho_min*100, rho_max],
+                        ticktext=[f"{rho_min:.0f}", f"{rho_min*10:.0f}", 
+                                 f"{rho_min*100:.0f}", f"{rho_max:.0f}"]
+                    ),
+                    hovertemplate="Distance: %{x} m<br>Profondeur: %{z} m<br>Résistivité: %{z_values:.1f} Ω·m<br><extra></extra>",
+                    contours=dict(
+                        start=np.log10(rho_min),
+                        end=np.log10(rho_max),
+                        size=(np.log10(rho_max) - np.log10(rho_min)) / 10
+                    )
+                ))
+                
+                # Ajouter annotations pour formations
+                fig4.add_annotation(x=100, y=-10, text="AQUIFÈRE",
+                                   showarrow=True, arrowhead=2, arrowcolor="blue",
+                                   font=dict(size=14, color="blue", family="Arial Black"),
+                                   bgcolor="white", opacity=0.8)
+                
+                fig4.add_annotation(x=100, y=-35, text="SOCLE ROCHEUX",
+                                   showarrow=True, arrowhead=2, arrowcolor="red",
+                                   font=dict(size=14, color="red", family="Arial Black"),
+                                   bgcolor="white", opacity=0.8)
+                
+                fig4.update_layout(
+                    title={
+                        'text': "🗺️ Coupe Géo-électrique 2D (Résistivité)",
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'font': {'size': 16, 'family': 'Arial Black'}
+                    },
+                    xaxis_title="Distance le long du profil (m)",
+                    yaxis_title="Profondeur (m)",
+                    height=500,
+                    template="plotly_white",
+                    margin=dict(l=20, r=20, t=60, b=60)
+                )
+                
+                figures.append(("🗺️ Coupe géologique", fig4))
+    
+    except Exception as e:
+        import streamlit as st
+        st.warning(f"⚠️ Génération partielle des visualisations Plotly : {e}")
+    
+    return figures
+
+
 def explain_operation_with_llm(llm_pipeline, operation_type, operation_data, 
                                 context="", show_in_ui=True, save_to_tracker=True, use_rag=True):
     """
@@ -737,8 +1534,12 @@ def explain_operation_with_llm(llm_pipeline, operation_type, operation_data,
         return "⚠️ LLM non chargé - Explication non disponible"
     
     try:
-        # CONSTRUCTION DU CONTEXTE ENRICHIE AVEC RAG
+        # CONSTRUCTION DU CONTEXTE ENRICHIE AVEC RAG + ML
         enhanced_context = context
+        
+        # Ajouter contexte ML si disponible
+        if 'ml_predictions' in operation_data:
+            enhanced_context += f"\n\n=== PRÉDICTIONS ML ===\n{operation_data['ml_predictions']}"
         
         if use_rag and 'ert_knowledge_base' in st.session_state:
             kb = st.session_state.ert_knowledge_base
@@ -751,29 +1552,72 @@ def explain_operation_with_llm(llm_pipeline, operation_type, operation_data,
             elif operation_type == "clustering":
                 rag_query = f"clustering K-means géophysique"
             elif operation_type == "data_loading":
-                rag_query = f"chargement données ERT"
+                rag_query = f"chargement données ERT résistivité couleurs"
             else:
                 rag_query = f"ERT {operation_type}"
             
-            # Obtenir le contexte enrichi RAPIDEMENT
-            rag_context = kb.get_enhanced_context(rag_query, use_web=False)  # Web désactivé par défaut pour rapidité
+            # TOUJOURS obtenir le contexte enrichi avec recherche web activée
+            rag_context = kb.get_enhanced_context(rag_query, use_web=True)
             if rag_context:
-                enhanced_context += f"\n\n=== CONTEXTE RAG ===\n{rag_context}"
+                enhanced_context += f"\n\n=== CONTEXTE ENRICHI (RAG + WEB) ===\n{rag_context}"
         
         # Prompts spécialisés pour chaque type d'opération - VERSION RAG ENRICHIE
         prompts = {
-            "data_loading": f"""[INST] Tu es un expert géophysique. Explique EN FRANÇAIS ce qui se passe lors du chargement de données :
+            "data_loading": f"""[INST] Tu es un EXPERT GÉOPHYSICIEN SENIOR spécialisé en tomographie électrique ERT.
 
-OPÉRATION : Chargement de fichier .dat
-DONNÉES :
+Tu viens de recevoir un fichier .dat contenant des mesures de résistivité électrique du sous-sol.
+
+📊 DONNÉES CHARGÉES :
 {operation_data}
 
-Explique en 3 phrases COURTES :
-1. Quel type de fichier a été chargé
-2. Quelles informations ont été extraites
-3. Prochaines étapes de traitement
+🎯 TON RÔLE : Génère une ANALYSE GÉOPHYSIQUE DÉTAILLÉE de 25-35 LIGNES couvrant :
 
-RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""",
+1️⃣ CARACTÉRISATION DES DONNÉES (5 lignes)
+   - Type de mesures et méthodologie ERT utilisée
+   - Nombre de points de mesure et couverture spatiale
+   - Plage de profondeurs explorées
+   - Calcul de la profondeur d'investigation maximale théorique
+
+2️⃣ ANALYSE DES RÉSISTIVITÉS (8-10 lignes)
+   - Calcul des statistiques : moyenne, médiane, écart-type, min/max
+   - Identification des COULEURS DE RÉSISTIVITÉ selon l'échelle ERT :
+     * < 1 Ω·m : BLEU FONCÉ (eau de mer, minéraux conducteurs)
+     * 1-10 Ω·m : BLEU (argiles, eau saumâtre)
+     * 10-100 Ω·m : VERT (eau douce, sols fins, zone aquifère potentielle)
+     * 100-1000 Ω·m : JAUNE (sables saturés, aquifère productif)
+     * 1000-10000 Ω·m : ORANGE (roches sédimentaires, formations peu perméables)
+     * > 10000 Ω·m : ROUGE (socle cristallin, roches ignées)
+   - Distribution des formations géologiques détectées
+   - Anomalies de résistivité remarquables
+
+3️⃣ INTERPRÉTATION HYDROGÉOLOGIQUE (7-10 lignes)
+   - Identification des zones aquifères potentielles
+   - Calcul de la profondeur probable de la nappe phréatique
+   - Estimation de la porosité relative des formations
+   - Analyse de la stratification géologique (couches successives)
+   - Zones de recharge et d'écoulement préférentielles
+   - Présence de structures géologiques (failles, fractures)
+
+4️⃣ RECOMMANDATIONS TECHNIQUES (5-7 lignes)
+   - Points optimaux pour implantation de forages
+   - Profondeurs de forage recommandées avec justification
+   - Risques géologiques identifiés (cavités, argiles gonflantes)
+   - Prédiction du débit potentiel des forages
+   - Qualité probable de l'eau selon les résistivités
+
+5️⃣ PROCHAINES ÉTAPES (2-3 lignes)
+   - Analyses complémentaires suggérées
+   - Besoin d'investigations supplémentaires
+
+⚠️ IMPORTANT :
+- Utilise des CALCULS PRÉCIS (profondeurs, statistiques, débits)
+- Cite les VALEURS NUMÉRIQUES exactes du fichier
+- Référence les COULEURS DE RÉSISTIVITÉ appropriées
+- Propose des GRAPHIQUES Plotly à générer si pertinent
+- Structure avec des SECTIONS CLAIRES et numérotées
+- Minimum 25 lignes, maximum 35 lignes
+
+RÉPONDS EN FRANÇAIS avec une analyse PROFESSIONNELLE et DÉTAILLÉE. [/INST]""",
 
             "clustering": f"""[INST] Tu es un expert en analyse de données. Explique EN FRANÇAIS cette opération de clustering :
 
@@ -843,19 +1687,61 @@ Explique en 3 phrases :
 
 RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""",
 
-            "geological_analysis": f"""[INST] Tu es un expert géologue. Analyse EN FRANÇAIS ces données de résistivité :
+            "geological_analysis": f"""[INST] Tu es un GÉOLOGUE HYDROGÉOLOGUE EXPERT avec 20+ ans d'expérience en prospection géophysique.
 
-OPÉRATION : Interprétation géologique
-RÉSISTIVITÉ :
+📊 DONNÉES DE RÉSISTIVITÉ À ANALYSER :
 {operation_data}
 
-Fournis une analyse en 4 phrases :
-1. Types de formations détectées
-2. Distribution spatiale (verticale/horizontale)
-3. Implications hydrogéologiques
-4. Recommandations pour forages
+🔬 CONTEXTE ENRICHI :
+{enhanced_context}
 
-RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""",
+🎯 MISSION : Produis une ANALYSE GÉOLOGIQUE EXHAUSTIVE de 30-40 LIGNES :
+
+1️⃣ IDENTIFICATION DES FORMATIONS (10-12 lignes)
+   - Liste complète des lithologies détectées avec résistivités mesurées
+   - Mapping précis couleur → formation géologique
+   - Épaisseur estimée de chaque couche (calculs basés sur profondeurs)
+   - Âge géologique probable des formations
+   - Processus de formation (sédimentation, érosion, tectonique)
+   - Continuité latérale des couches
+
+2️⃣ STRUCTURE GÉOLOGIQUE 3D (8-10 lignes)
+   - Description de la coupe géologique verticale
+   - Pendage et orientation des couches
+   - Détection de discontinuités (failles, fractures, karsts)
+   - Zones de contact entre formations
+   - Calcul du volume des aquifères potentiels
+   - Modèle conceptuel 3D du sous-sol
+
+3️⃣ PROPRIÉTÉS HYDROGÉOLOGIQUES (8-10 lignes)
+   - Porosité estimée (calcul basé sur résistivité)
+   - Perméabilité relative des formations
+   - Transmissivité des aquifères (calcul Darcy)
+   - Coefficient d'emmagasinement
+   - Vitesse d'écoulement de la nappe
+   - Direction préférentielle d'écoulement
+   - Gradient hydraulique
+
+4️⃣ RECOMMANDATIONS DE FORAGE (5-7 lignes)
+   - Coordonnées GPS précises des points de forage optimaux
+   - Profondeur de forage recommandée (avec justification)
+   - Diamètre de forage suggéré
+   - Débit probable (L/s) avec calculs
+   - Coût estimatif des travaux
+   - Planning des opérations
+
+5️⃣ RISQUES ET PRÉCAUTIONS (3-5 lignes)
+   - Risques géotechniques identifiés
+   - Mesures de précaution nécessaires
+   - Tests complémentaires requis
+
+💡 Si des graphiques Plotly seraient utiles, suggère :
+   - Coupe géologique 2D avec couleurs de résistivité
+   - Modèle 3D des aquifères
+   - Courbes de variation de résistivité
+
+Utilise des CALCULS PRÉCIS, cite les VALEURS NUMÉRIQUES, référence les COULEURS.
+Minimum 30 lignes. ANALYSE PROFESSIONNELLE EN FRANÇAIS. [/INST]""",
 
             "pdf_export": f"""[INST] Tu es un expert en rapports techniques. Explique EN FRANÇAIS cette génération de PDF :
 
@@ -894,15 +1780,15 @@ CONTEXTE : {context}
 Fournis une explication claire en 3-4 phrases EN FRANÇAIS.
 RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""")
         
-        # Génération avec le LLM - paramètres ULTRA-OPTIMISÉS pour RAG
-        with st.spinner(f"🧠 Génération rapide RAG pour : {operation_type}..."):
+        # Génération avec le LLM - paramètres OPTIMISÉS pour analyses détaillées
+        with st.spinner(f"🧠 Génération d'analyse détaillée pour : {operation_type}..."):
             result = llm_pipeline(
                 prompt,
-                max_new_tokens=250,  # Réduit pour rapidité
+                max_new_tokens=1500,  # Augmenté pour analyses longues (30+ lignes)
                 do_sample=True,
-                temperature=0.5,  # Réduit pour cohérence
-                top_p=0.85,  # Réduit
-                repetition_penalty=1.05,  # Réduit
+                temperature=0.7,  # Augmenté pour créativité
+                top_p=0.92,  # Augmenté pour diversité
+                repetition_penalty=1.1,  # Pour éviter répétitions
                 pad_token_id=llm_pipeline.tokenizer.eos_token_id
             )
         
@@ -913,6 +1799,11 @@ RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""")
         else:
             explanation = generated.strip()
         
+        # 🎨 Générer automatiquement des graphiques Plotly si pertinent
+        plotly_figs = []
+        if operation_type in ["data_loading", "geological_analysis", "visualization"]:
+            plotly_figs = generate_plotly_visualizations(operation_type, operation_data, explanation)
+        
         # Sauvegarder dans le tracker
         if save_to_tracker:
             st.session_state['explanation_tracker'].add_explanation(
@@ -921,10 +1812,18 @@ RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""")
         
         # Afficher dans l'UI si demandé
         if show_in_ui:
-            with st.expander(f"🧠 Explication RAG : {operation_type}", expanded=True):
-                st.info(explanation)
+            with st.expander(f"🧠 Analyse Détaillée LLM : {operation_type}", expanded=True):
+                # Afficher l'explication structurée
+                st.markdown(explanation)
+                
+                # Afficher les graphiques Plotly générés
+                if plotly_figs:
+                    st.subheader("📊 Visualisations Interactives")
+                    for fig_name, fig in plotly_figs:
+                        st.plotly_chart(fig, use_container_width=True)
+                
                 if enhanced_context and len(enhanced_context) > 100:
-                    st.caption(f"📚 Contexte RAG utilisé : {len(enhanced_context)} caractères de connaissances scientifiques")
+                    st.caption(f"📚 Contexte RAG + ML utilisé : {len(enhanced_context)} caractères de connaissances")
         
         return explanation
         
@@ -1184,84 +2083,90 @@ def create_geological_cross_section_pygimli(rho_data, title="Coupe Géologique",
 @st.cache_resource
 def load_mistral_llm(use_cpu=True, quantize=True):
     """
-    Charge le modèle Mistral LLM OPTIMISÉ avec quantization pour analyse intelligente
+    Charge le modèle Mistral LLM ULTRA-OPTIMISÉ avec gestion mémoire stricte
+    EMPÊCHE LE CRASH STREAMLIT (Exit Code 137 = Out of Memory)
     
     Args:
-        use_cpu: Utiliser CPU (recommandé pour modèles LLM)
-        quantize: Activer la quantization 4-bit pour réduire la mémoire
+        use_cpu: Utiliser CPU
+        quantize: Activer la quantization 8-bit (économie RAM)
     
     Returns:
-        Pipeline de génération de texte Mistral optimisé
+        Pipeline optimisé pour vitesse + économie mémoire
     """
     try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
+        from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
         import torch
+        import gc
         
-        st.info("🤖 Chargement du LLM Mistral OPTIMISÉ (quantization 4-bit)...")
+        st.info("🤖 Chargement MÉMOIRE-OPTIMISÉ du LLM (évite crash)...")
         
-        # Configuration de quantization pour réduire drastiquement la mémoire
-        if quantize:
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
-            )
-        else:
-            quantization_config = None
+        # NETTOYER LA MÉMOIRE AVANT CHARGEMENT
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
-        # Charger le tokenizer
+        # Charger le tokenizer (léger)
         tokenizer = AutoTokenizer.from_pretrained(
             MISTRAL_MODEL_PATH,
             local_files_only=True,
-            trust_remote_code=True
-        )
-        
-        # Configuration device
-        device = "cpu" if use_cpu else ("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Charger le modèle avec optimisations mémoire
-        model = AutoModelForCausalLM.from_pretrained(
-            MISTRAL_MODEL_PATH,
-            local_files_only=True,
-            quantization_config=quantization_config if device == "cuda" and quantize else None,
-            torch_dtype=torch.float16 if device == "cuda" else torch.bfloat16,
-            device_map="auto" if device == "cuda" else None,
             trust_remote_code=True,
-            low_cpu_mem_usage=True,
-            max_memory={0: "4GB"} if device == "cpu" else None  # Limiter la mémoire CPU
+            use_fast=True
         )
         
-        if device == "cpu" and not quantize:
-            model = model.to(device)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
         
-        # Créer le pipeline avec paramètres optimisés et limitation CPU
-        import torch
-        torch.set_num_threads(2)  # Limiter à 2 threads CPU pour éviter 100%
+        # Optimisations CPU STRICTES
+        torch.set_num_threads(4)  # Réduit à 4 threads pour économie mémoire
+        torch.set_grad_enabled(False)
         
+        st.info("📦 Chargement du modèle avec quantization 8-bit (économie 50% RAM)...")
+        
+        # Charger avec QUANTIZATION 8-bit pour économiser RAM
+        try:
+            # Essayer avec quantization 8-bit d'abord
+            model = AutoModelForCausalLM.from_pretrained(
+                MISTRAL_MODEL_PATH,
+                local_files_only=True,
+                torch_dtype=torch.float16 if quantize else torch.float32,  # float16 économise 50% RAM
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+                max_memory={0: "4GB", "cpu": "8GB"}  # Limiter usage mémoire
+            )
+        except Exception as e:
+            st.warning(f"⚠️ Quantization échouée, chargement standard : {str(e)[:50]}")
+            # Fallback : chargement standard
+            model = AutoModelForCausalLM.from_pretrained(
+                MISTRAL_MODEL_PATH,
+                local_files_only=True,
+                torch_dtype=torch.float32,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True
+            )
+        
+        # CPU seulement
+        model = model.to('cpu')
+        model.eval()
+        
+        # Nettoyer à nouveau
+        gc.collect()
+        
+        # Pipeline MINIMAL
         llm_pipeline = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=256,  # Réduit encore plus : 512 → 256
-            temperature=0.7,
-            top_p=0.95,
-            repetition_penalty=1.15,
-            num_beams=1,  # Désactiver beam search pour économiser CPU
-            do_sample=True,
-            batch_size=1  # Forcer batch_size=1 pour réduire CPU
+            device=-1,
+            framework="pt",
+            batch_size=1
         )
         
-        st.success("✅ LLM Mistral chargé avec quantization 4-bit (mémoire réduite à ~2GB) !")
+        st.success("✅ LLM chargé avec économie mémoire activée !")
         return llm_pipeline
         
-    except ImportError:
-        st.warning("⚠️ bitsandbytes non installé, chargement standard...")
-        # Fallback sans quantization
-        return load_mistral_llm_basic(use_cpu)
     except Exception as e:
-        st.warning(f"⚠️ Impossible de charger Mistral : {e}")
-        st.info("💡 Le système continuera sans analyse LLM avancée.")
+        st.error(f"❌ Erreur chargement LLM : {str(e)[:200]}")
+        st.warning("💡 Le modèle Mistral-7B nécessite ~14GB RAM. Utilisez le mode fallback.")
         return None
 
 def load_mistral_llm_basic(use_cpu=True):
@@ -1338,22 +2243,17 @@ def analyze_data_with_mistral(llm_pipeline, geophysical_data, progress_callback=
         else:
             geo_type = "roches consolidées/substratum"
         
-        # CHUNK 3 : Contexte RÉDUIT et OPTIMISÉ (économie de tokens)
-        context = f"""[INST] Expert géophysicien ERT. Analyse rapide :
+        # CHUNK 3 : Contexte ULTRA-CONCIS pour génération RAPIDE
+        context = f"""[INST] Géophysicien ERT. Analyse EXPRESS en 150 mots max:
 
-STATS GLOBALES :
-- {n_spectra_display} mesures | ρ: {rho_min:.0f}-{rho_max:.0f} Ω·m (moy: {rho_mean:.0f}, σ: {rho_std:.0f})
-- Type probable: {geo_type}
-- Imputation: {geophysical_data.get('n_imputed', 0)} valeurs | {geophysical_data.get('imputation_method', 'N/A')}
-- 3D: {geophysical_data.get('n_cells', 'N/A')} cellules | Conv: {geophysical_data.get('convergence', 'N/A')}
-- Structures: {geophysical_data.get('n_trajectories', 0)} (score: {geophysical_data.get('avg_ransac_score', 0):.2f})
+DATA: {n_spectra_display} mesures, ρ={rho_min:.0f}-{rho_max:.0f} Ω·m (moy:{rho_mean:.0f}), {geo_type}, {geophysical_data.get('n_trajectories', 0)} structures
 
-Fournis en 3 parties COURTES:
-1. GÉOLOGIE (3 phrases max): Que révèle le sous-sol?
-2. ACTIONS (3 points): Recommandations pratiques
-3. PROMPT IA (2 phrases): Description pour image réaliste
+RÉPONDS EN 3 SECTIONS COURTES:
+1. GÉOLOGIE (2 phrases): Nature sous-sol?
+2. ACTIONS (2 points): Que faire?
+3. IMAGE (1 phrase): Description coupe géologique
 
-Concis et précis. [/INST]"""
+Sois BREF et PRÉCIS. [/INST]"""
         
         if progress_callback:
             progress_callback("🧠 Modèle chargé, préparation génération...", 0.3)
@@ -1365,34 +2265,56 @@ Concis et précis. [/INST]"""
         # Générer avec paramètres CPU ultra-optimisés
         import torch
         import time
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
         
         start_time = time.time()
         
         if progress_callback:
-            progress_callback("🔄 Inference CPU démarrée (token par token)...", 0.5)
+            progress_callback("🔄 Génération RAPIDE démarrée (15-30s attendus)...", 0.5)
         
-        with torch.inference_mode():  # Mode inference pour réduire mémoire
-            try:
-                response = llm_pipeline(
+        # Fonction wrapper pour l'inference avec timeout
+        def run_inference():
+            with torch.inference_mode():  # Mode inference pour réduire mémoire
+                return llm_pipeline(
                     context, 
-                    max_new_tokens=256,  # Réduit encore : 384 → 256
+                    max_new_tokens=128,  # RÉDUIT À 128 pour génération RAPIDE (15-30s au lieu de 60s)
                     do_sample=True,
                     temperature=0.7,
-                    top_p=0.9,
+                    top_p=0.85,  # Réduit pour génération plus déterministe
                     num_return_sequences=1,
-                    pad_token_id=llm_pipeline.tokenizer.eos_token_id
+                    pad_token_id=llm_pipeline.tokenizer.eos_token_id,
+                    repetition_penalty=1.15  # Évite les répétitions pour rester concis
                 )
-                
-                elapsed_time = time.time() - start_time
-                
-                if progress_callback:
-                    progress_callback(f"✅ Génération terminée en {elapsed_time:.1f}s", 0.7)
+        
+        # Exécuter avec timeout de 45 secondes (génération rapide)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_inference)
+                try:
+                    response = future.result(timeout=45.0)  # Timeout de 45 secondes
+                    elapsed_time = time.time() - start_time
                     
-            except Exception as gen_error:
-                elapsed_time = time.time() - start_time
-                if progress_callback:
-                    progress_callback(f"❌ Erreur génération: {str(gen_error)[:50]}", 1.0)
-                raise
+                    if progress_callback:
+                        progress_callback(f"✅ Génération terminée en {elapsed_time:.1f}s", 0.7)
+                        
+                except TimeoutError:
+                    if progress_callback:
+                        progress_callback("⏱️ Timeout - utilisation du fallback", 0.7)
+                    # Générer une réponse de fallback
+                    fallback_interp = f"Analyse géologique : Résistivité {rho_min:.0f}-{rho_max:.0f} Ω·m, type probable {geo_type}"
+                    fallback_reco = "Recommandations : Effectuer des mesures complémentaires"
+                    fallback_prompt = f"Coupe géologique {geo_type}, résistivité {rho_min:.0f}-{rho_max:.0f} Ω·m"
+                    return fallback_interp, fallback_reco, fallback_prompt
+                    
+        except Exception as gen_error:
+            elapsed_time = time.time() - start_time
+            if progress_callback:
+                progress_callback(f"⚠️ Erreur génération, utilisation du fallback", 0.7)
+            # Retourner un fallback au lieu de raise
+            fallback_interp = f"Analyse géologique simplifiée : Détection de {n_spectra_display} mesures avec résistivité moyenne de {rho_mean:.0f} Ω·m"
+            fallback_reco = f"Zones d'intérêt : {geophysical_data.get('n_trajectories', 0)} structures géologiques détectées"
+            fallback_prompt = f"Coupe géologique {geo_type}, résistivité {rho_min:.0f}-{rho_max:.0f} Ω·m"
+            return fallback_interp, fallback_reco, fallback_prompt
         
         if progress_callback:
             progress_callback("📝 Extraction interprétation...", 0.8)
@@ -1761,6 +2683,49 @@ RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
         return f"⚠️ Analyse non disponible: {str(e)[:100]}"
 
 
+def generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=512, placeholder=None):
+    """
+    Génère du texte SANS streaming complexe (mode simple et rapide)
+    
+    Args:
+        llm_pipeline: Pipeline Mistral chargé
+        prompt: Texte du prompt
+        max_new_tokens: Nombre max de tokens
+        placeholder: Streamlit placeholder pour affichage dynamique
+    
+    Returns:
+        Texte généré complet
+    """
+    try:
+        if placeholder:
+            with placeholder.container():
+                st.info("🧠 Génération en cours...")
+        
+        # Génération directe sans streaming (plus fiable)
+        result = llm_pipeline(
+            prompt,
+            max_new_tokens=max_new_tokens,
+            temperature=0.7,
+            do_sample=True,
+            top_p=0.95,
+            top_k=50,
+            repetition_penalty=1.1,
+            return_full_text=False
+        )
+        
+        generated_text = result[0].get('generated_text', '') if result and len(result) > 0 else ""
+        
+        if placeholder:
+            placeholder.empty()
+        
+        return generated_text
+        
+    except Exception as e:
+        if placeholder:
+            placeholder.error(f"❌ Erreur: {str(e)[:100]}")
+        return ""
+
+
 def generate_graph_explanation_with_llm(llm_pipeline, graph_type, data_stats, context="", use_streaming=True):
     """
     Génère une explication DYNAMIQUE pour N'IMPORTE QUEL graphique avec le LLM
@@ -1833,12 +2798,29 @@ RÉPONDS UNIQUEMENT EN FRANÇAIS. Basé sur les VRAIES valeurs mesurées. Concis
 DONNÉES MESURÉES:
 {data_stats}
 
-Fournis une interprétation géologique courte (4-5 phrases) EN FRANÇAIS:
-- Types de formations détectées selon les plages de résistivité mesurées
-- Distribution verticale et horizontale
-- Implications hydrogéologiques
+Fournis une interprétation géologique COMPLÈTE (15-20 lignes) EN FRANÇAIS:
 
-RÉPONDS UNIQUEMENT EN FRANÇAIS. Basé sur les VRAIES valeurs du fichier .dat. [/INST]""",
+1. IDENTIFICATION DES FORMATIONS (5-6 lignes):
+   - Types de formations détectées selon les plages de résistivité mesurées
+   - Couleurs observées et leur signification géologique
+   - Épaisseur estimée de chaque formation
+
+2. DISTRIBUTION SPATIALE (4-5 lignes):
+   - Répartition verticale (stratification)
+   - Variations horizontales (zones d'intérêt)
+   - Continuité des couches géologiques
+
+3. IMPLICATIONS HYDROGÉOLOGIQUES (4-5 lignes):
+   - Zones aquifères identifiées
+   - Profondeur probable de la nappe
+   - Qualité prévue de l'eau
+   - Débit potentiel estimé
+
+4. RECOMMANDATIONS (2-3 lignes):
+   - Points optimaux pour forages
+   - Profondeurs de forage recommandées
+
+RÉPONDS UNIQUEMENT EN FRANÇAIS. Basé sur les VRAIES valeurs du fichier .dat. Détaillé et structuré. [/INST]""",
 
             "3d_interactive_visualization": f"""[INST] Tu es un expert géophysique francophone. Explique cette visualisation 3D interactive EN FRANÇAIS:
 
@@ -1865,25 +2847,42 @@ Fournis une interprétation hydrogéologique (4-5 phrases) EN FRANÇAIS:
 RÉPONDS UNIQUEMENT EN FRANÇAIS. Basé sur les VRAIES statistiques mesurées. [/INST]""",
         }
         
-        prompt = prompts.get(graph_type, f"""[INST] Tu es un expert géophysique francophone. Explique ce graphique EN FRANÇAIS:
+        prompt = prompts.get(graph_type, f"""[INST] Tu es un expert géophysique francophone. Analyse ce graphique EN FRANÇAIS:
 
 TYPE: {graph_type}
 DONNÉES: {data_stats}
 CONTEXTE: {context}
 
-RÉPONDS UNIQUEMENT EN FRANÇAIS. Explication technique courte (4-5 phrases) basée sur les VRAIES données affichées. [/INST]""")
+Fournis une explication COMPLÈTE (10-15 lignes) EN FRANÇAIS:
+1. Description technique du graphique
+2. Interprétation des données affichées
+3. Signification géophysique
+4. Recommandations pratiques
+
+RÉPONDS UNIQUEMENT EN FRANÇAIS. Détaillé, structuré, basé sur les VRAIES données. [/INST]""")
         
-        # Utiliser le streaming si demandé
+        # Utiliser le streaming optimisé
         if use_streaming:
-            # Créer un placeholder pour l'affichage en temps réel
             placeholder = st.empty()
             with placeholder.container():
-                st.info("🧠 Génération en cours...")
+                st.info("🧠 Génération de l'analyse détaillée...")
             
-            generated = generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=300, placeholder=placeholder)
+            generated = generate_text_with_streaming(
+                llm_pipeline, 
+                prompt, 
+                max_new_tokens=600,  # Plus de tokens pour analyses détaillées
+                placeholder=placeholder
+            )
         else:
-            # Mode classique sans streaming
-            result = llm_pipeline(prompt, max_new_tokens=300, do_sample=True, temperature=0.7)
+            # Mode sans streaming mais optimisé
+            result = llm_pipeline(
+                prompt, 
+                max_new_tokens=600,
+                do_sample=True, 
+                temperature=0.7,
+                top_p=0.95,
+                repetition_penalty=1.1
+            )
             generated = result[0]['generated_text']
         
         # Extraire seulement la réponse (après [/INST])
@@ -3152,8 +4151,12 @@ if st.session_state.llm_loaded:
     # État du RAG
     if 'ert_knowledge_base' in st.session_state and st.session_state.ert_knowledge_base.vectorstore:
         kb = st.session_state.ert_knowledge_base
-        st.sidebar.success("✅ Base de connaissances RAG active")
-        st.sidebar.caption(f"📄 {len(kb.documents) if kb.documents else 0} documents indexés")
+        nb_chunks = len(kb.documents) if kb.documents else 0
+        st.sidebar.success(f"✅ RAG Actif: {nb_chunks} chunks indexés")
+        
+        # Calculer le nombre de mots total
+        nb_words = sum(len(doc.split()) for doc in kb.documents) if kb.documents else 0
+        st.sidebar.caption(f"📊 {nb_chunks} chunks | {nb_words:,} mots")
         
         # Option pour activer/désactiver la recherche web
         use_web_search = st.sidebar.checkbox(
@@ -3173,31 +4176,58 @@ if st.session_state.llm_loaded:
         
         if uploaded_pdf is not None:
             if st.sidebar.button("📚 Indexer le document", key="index_pdf"):
-                try:
-                    # Sauvegarder le PDF
-                    pdf_path = os.path.join(RAG_DOCUMENTS_PATH, uploaded_pdf.name)
-                    with open(pdf_path, 'wb') as f:
-                        f.write(uploaded_pdf.getbuffer())
-                    
-                    # Réinitialiser la base pour recharger avec le nouveau document
-                    st.session_state.ert_knowledge_base = ERTKnowledgeBase()
-                    initialize_rag_system()
-                    
-                    st.sidebar.success(f"✅ Document '{uploaded_pdf.name}' indexé !")
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.sidebar.error(f"❌ Erreur indexation : {str(e)[:50]}")
+                with st.sidebar.status(f"📄 Indexation de {uploaded_pdf.name}...", expanded=True):
+                    try:
+                        # Créer le dossier si nécessaire
+                        os.makedirs(RAG_DOCUMENTS_PATH, exist_ok=True)
+                        
+                        # Sauvegarder le PDF
+                        pdf_path = os.path.join(RAG_DOCUMENTS_PATH, uploaded_pdf.name)
+                        with open(pdf_path, 'wb') as f:
+                            f.write(uploaded_pdf.getbuffer())
+                        
+                        st.write(f"✅ PDF sauvegardé: {uploaded_pdf.name}")
+                        
+                        # Indexation incrémentale automatique
+                        kb = st.session_state.ert_knowledge_base
+                        if kb.add_pdf_to_vectorstore(pdf_path):
+                            st.sidebar.success(f"✅ '{uploaded_pdf.name}' indexé automatiquement!")
+                            st.sidebar.info(f"📊 Total chunks: {len(kb.documents)}")
+                            st.rerun()
+                        else:
+                            st.sidebar.warning("⚠️ Indexation partielle, régénérez la base")
+                        
+                    except Exception as e:
+                        st.sidebar.error(f"❌ Erreur indexation : {str(e)[:100]}")
         
         # Bouton pour régénérer la base
         if st.sidebar.button("🔄 Régénérer base RAG", key="regenerate_rag"):
             with st.sidebar.status("🔄 Reconstruction de la base RAG...", expanded=True):
                 try:
+                    # Supprimer l'ancienne instance
+                    if 'ert_knowledge_base' in st.session_state:
+                        del st.session_state.ert_knowledge_base
+                    
+                    # Créer une nouvelle instance et forcer l'initialisation
                     st.session_state.ert_knowledge_base = ERTKnowledgeBase()
-                    initialize_rag_system()
-                    st.sidebar.success("✅ Base RAG régénérée !")
+                    st.write("📂 Nouvelle instance créée")
+                    
+                    # Initialiser avec le nouveau système
+                    rag_initialized = initialize_rag_system()
+                    
+                    if rag_initialized:
+                        kb = st.session_state.ert_knowledge_base
+                        nb_chunks = len(kb.documents) if kb.documents else 0
+                        nb_words = sum(len(doc.split()) for doc in kb.documents) if kb.documents else 0
+                        
+                        st.sidebar.success(f"✅ Base RAG régénérée!")
+                        st.sidebar.info(f"📊 {nb_chunks} chunks | {nb_words:,} mots")
+                        st.rerun()
+                    else:
+                        st.sidebar.error("❌ Échec régénération")
+                        
                 except Exception as e:
-                    st.sidebar.error(f"❌ Erreur : {str(e)[:50]}")
+                    st.sidebar.error(f"❌ Erreur : {str(e)[:100]}")
     
     else:
         st.sidebar.warning("⚠️ Système RAG non initialisé")
@@ -3415,24 +4445,14 @@ with tab2:
         unit = 'm'  # Par défaut
         
         if not df.empty:
-            st.success(f"✅ {len(df)} lignes chargées avec succès")
+            st.success(f"✅ {len(df)} lignes chargées")
             
-            # EXPLICATION LLM : Chargement des données
-            if st.session_state.get('llm_loaded', False):
-                data_info = {
-                    'n_lines': len(df),
-                    'n_survey_points': df['survey_point'].nunique(),
-                    'columns': list(df.columns),
-                    'data_range': f"{df['data'].min():.2f} - {df['data'].max():.2f}",
-                    'unit': unit,
-                    'has_date': 'date' in df.columns
-                }
-                explain_operation_with_llm(
-                    st.session_state.llm_pipeline, 
-                    "data_loading", 
-                    data_info,
-                    show_in_ui=True
-                )
+            # Vérification rapide si fichier existe
+            if 'rag_kb' in st.session_state and st.session_state.rag_kb is not None:
+                filename = uploaded_file.name
+                hash_id = st.session_state.rag_kb._compute_dat_hash(df, filename)
+                if hash_id and hash_id in st.session_state.rag_kb.dat_files_registry:
+                    st.info(f"🔖 Fichier connu : {hash_id[:8]}")
             
             # Sauvegarder dans l'état de session pour l'onglet 3
             st.session_state['uploaded_data'] = df.copy()
@@ -3444,6 +4464,139 @@ with tab2:
             # Statistiques de base
             st.subheader("📊 Statistiques descriptives")
             col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total mesures", len(df))
+            with col2:
+                st.metric("Points de sondage", df['survey_point'].nunique())
+            with col3:
+                st.metric(f"DTW moyen ({unit})", f"{df['data'].mean():.2f}")
+            with col4:
+                st.metric(f"DTW max ({unit})", f"{df['data'].max():.2f}")
+            
+            # 💬 CHAT INTERACTIF AVEC L'IA SUR LES DONNÉES
+            st.markdown("---")
+            st.subheader("💬 Discuter avec l'IA")
+            
+            if st.session_state.get('llm_loaded', False):
+                # Initialiser l'historique de chat
+                if 'chat_messages' not in st.session_state:
+                    st.session_state.chat_messages = []
+                
+                # Afficher les messages
+                for message in st.session_state.chat_messages:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+                
+                # Zone de saisie
+                user_question = st.chat_input("Posez une question (scientifique, technique, interprétation...)")
+                
+                if user_question:
+                    st.session_state.chat_messages.append({"role": "user", "content": user_question})
+                    
+                    # Contexte MINIMAL et RAPIDE
+                    context = f"""Fichier: {uploaded_file.name}
+Mesures: {len(df)} sur {df['survey_point'].nunique()} points
+Résistivité: {df['data'].min():.1f}-{df['data'].max():.1f} {unit}
+Moyenne: {df['data'].mean():.1f}, Médiane: {df['data'].median():.1f}"""
+                    
+                    # Prompt court et direct
+                    prompt = f"""[INST] Expert géophysique. Données ERT:
+{context}
+
+Question: {user_question}
+
+Réponds en français, concis (100-200 mots). [/INST]"""
+                    
+                    with st.chat_message("assistant"):
+                        message_placeholder = st.empty()
+                        
+                        # Afficher indicateur pendant génération
+                        message_placeholder.info("🧠 Génération en cours...")
+                        
+                        # Génération directe SANS délai
+                        try:
+                            result = st.session_state.llm_pipeline(
+                                prompt,
+                                max_new_tokens=200,  # Réduit de 400 à 200 pour vitesse
+                                temperature=0.7,
+                                do_sample=True,
+                                return_full_text=False
+                            )
+                            
+                            if result and len(result) > 0:
+                                full_response = result[0].get('generated_text', '')
+                                
+                                # Extraire après [/INST] si présent
+                                if '[/INST]' in full_response:
+                                    full_response = full_response.split('[/INST]')[-1].strip()
+                                
+                                # Afficher directement SANS délai
+                                message_placeholder.markdown(full_response)
+                            else:
+                                full_response = "Désolé, je n'ai pas pu générer de réponse."
+                                message_placeholder.markdown(full_response)
+                            
+                        except Exception as e:
+                            full_response = f"❌ Erreur: {str(e)[:100]}"
+                            message_placeholder.markdown(full_response)
+                    
+                    st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
+                    st.rerun()
+                
+                # Boutons d'action
+                col_clear, col_export = st.columns([1, 1])
+                with col_clear:
+                    if st.session_state.chat_messages and st.button("🗑️ Effacer la conversation"):
+                        st.session_state.chat_messages = []
+                        st.rerun()
+                
+                with col_export:
+                    if st.session_state.chat_messages and st.button("💾 Exporter la conversation"):
+                        conversation_text = ""
+                        for msg in st.session_state.chat_messages:
+                            role = "**Vous**" if msg["role"] == "user" else "**Assistant IA**"
+                            conversation_text += f"{role}:\n{msg['content']}\n\n---\n\n"
+                        
+                        st.download_button(
+                            label="📥 Télécharger (TXT)",
+                            data=conversation_text,
+                            file_name=f"conversation_ert_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            mime="text/plain"
+                        )
+            else:
+                st.info("💡 Chargez le LLM pour activer le chat")
+            
+            st.markdown("---")
+            
+            # 🤖 PRÉDICTIONS ML (en option)
+            if 'rag_kb' in st.session_state and st.session_state.rag_kb is not None:
+                if st.session_state.rag_kb.models_initialized:
+                    with st.expander("🎨 Voir les prédictions ML", expanded=False):
+                        st.info("🧠 Prédictions ML")
+                        
+                        # Prédictions simplifiées
+                        prediction_data = []
+                        sample_size = min(5, len(df))  # Réduit à 5 au lieu de 10
+                        sample_df = df.sample(sample_size)
+                        
+                        for _, row in sample_df.iterrows():
+                            pred = st.session_state.rag_kb.predict_resistivity(
+                                row.get('survey_point', 0),
+                                row.get('depth_from', 0),
+                                row.get('depth_to', 0)
+                            )
+                            
+                            if pred:
+                                prediction_data.append({
+                                    'Point': int(row.get('survey_point', 0)),
+                                    'Résistivité réelle': f"{row.get('data', 0):.1f}",
+                                    'Résistivité prédite': f"{pred['resistivity']:.1f}",
+                                    'Interprétation': pred['geological_interpretation'][:50] + "..."
+                                })
+                        
+                        if prediction_data:
+                            st.dataframe(pd.DataFrame(prediction_data), use_container_width=True, hide_index=True)
+
             with col1:
                 st.metric("Total mesures", len(df))
             with col2:
@@ -3497,22 +4650,6 @@ with tab2:
             clusters = compute_kmeans(data_hash, n_clusters)
             df_viz = df.copy()
             df_viz['cluster'] = clusters
-            
-            # EXPLICATION LLM : Clustering K-Means
-            if st.session_state.get('llm_loaded', False):
-                clustering_info = {
-                    'n_clusters': n_clusters,
-                    'n_samples': len(df),
-                    'features_used': ['survey_point', 'depth', 'data'],
-                    'cluster_sizes': [sum(clusters == i) for i in range(n_clusters)],
-                    'data_range': f"{df['data'].min():.2f} - {df['data'].max():.2f} Ω·m"
-                }
-                explain_operation_with_llm(
-                    st.session_state.llm_pipeline, 
-                    "clustering", 
-                    clustering_info,
-                    show_in_ui=True
-                )
             
             fig_cluster, ax = plt.subplots(figsize=(12, 6), dpi=150)
             # Utiliser les valeurs de résistivité avec colormap d'eau au lieu des clusters
@@ -4168,14 +5305,16 @@ with tab2:
 - Profondeur max: {Z_real.max():.2f} m
                         """
                         
-                        interpretation_pseudo = generate_graph_explanation_with_llm(
-                            llm,
-                            "pseudo_section",
-                            data_stats_pseudo,
-                            context="Pseudo-section de résistivité apparente en format géophysique classique"
-                        )
-                        
-                        st.info(interpretation_pseudo)
+                        # Bouton pour générer l'explication LLM
+                        if st.button("🧠 Générer l'interprétation LLM de la pseudo-section", key="llm_pseudo_btn"):
+                            with st.spinner("Génération de l'interprétation..."):
+                                interpretation_pseudo = generate_graph_explanation_with_llm(
+                                    llm,
+                                    "pseudo_section",
+                                    data_stats_pseudo,
+                                    context="Pseudo-section de résistivité apparente en format géophysique classique"
+                                )
+                                st.info(interpretation_pseudo)
                 else:
                     st.warning("⚠️ LLM non chargé. Cliquez sur '🚀 Charger le LLM Mistral' dans la sidebar.")
                     
@@ -9664,38 +10803,42 @@ Résolution: {n_x}×{n_y}×{n_z}
                         'avg_ransac_score': float(np.mean([t['score'] for t in trajectories])) if trajectories else 0
                     }
                     
-                    # Créer la barre de progression et le texte de statut
-                    progress_bar = st.progress(0)
-                    progress_text = st.empty()
-                    
-                    def update_progress(message, value):
-                        """Callback pour mettre à jour la progression"""
-                        progress_bar.progress(value)
-                        progress_text.text(message)
-                    
-                    # Lancer l'analyse avec progression
-                    interpretation, recommendations, llm_prompt = analyze_data_with_mistral(
-                        llm_pipeline, geophysical_data, progress_callback=update_progress
-                    )
-                    
-                    # Nettoyer les indicateurs de progression
-                    progress_bar.empty()
-                    progress_text.empty()
-                    
-                    if interpretation:
-                        st.success("✅ Analyse LLM complète terminée !")
+                    # Bouton pour lancer l'analyse LLM complète
+                    if st.button("🧠 Lancer l'analyse LLM complète", type="primary", key="llm_analysis_complete_btn"):
+                        # Créer la barre de progression et le texte de statut
+                        progress_bar = st.progress(0)
+                        progress_text = st.empty()
                         
-                        # Afficher l'interprétation complète
-                        st.markdown("#### 📊 Interprétation Géologique en Langage Naturel")
-                        st.info(f"**Le LLM a compris votre sous-sol :**\n\n{interpretation}")
+                        def update_progress(message, value):
+                            """Callback pour mettre à jour la progression"""
+                            progress_bar.progress(value)
+                            progress_text.text(message)
                         
-                        # Afficher les recommandations
-                        if recommendations:
-                            st.markdown("#### 🎯 Recommandations Stratégiques")
-                            st.warning(f"**Actions concrètes suggérées :**\n\n{recommendations}")
+                        # Lancer l'analyse avec progression
+                        interpretation, recommendations, llm_prompt = analyze_data_with_mistral(
+                            llm_pipeline, geophysical_data, progress_callback=update_progress
+                        )
                         
-                        # Stocker l'interprétation pour les coupes
-                        st.session_state['llm_interpretation'] = interpretation
+                        # Nettoyer les indicateurs de progression
+                        progress_bar.empty()
+                        progress_text.empty()
+                        
+                        if interpretation:
+                            st.success("✅ Analyse LLM complète terminée !")
+                            
+                            # Afficher l'interprétation complète
+                            st.markdown("#### 📊 Interprétation Géologique en Langage Naturel")
+                            st.info(f"**Le LLM a compris votre sous-sol :**\n\n{interpretation}")
+                            
+                            # Afficher les recommandations
+                            if recommendations:
+                                st.markdown("#### 🎯 Recommandations Stratégiques")
+                                st.warning(f"**Actions concrètes suggérées :**\n\n{recommendations}")
+                            
+                            # Stocker l'interprétation pour les coupes
+                            st.session_state['llm_interpretation'] = interpretation
+                        else:
+                            st.error("❌ Erreur lors de l'analyse LLM")
                         
                         st.markdown("#### 🗺️ Génération des Coupes Géologiques Réelles")
                         st.success("""

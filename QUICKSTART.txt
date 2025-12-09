@@ -1,0 +1,123 @@
+╔════════════════════════════════════════════════════════════════╗
+║  📘 SETRAF - GUIDE RAPIDE POST-OPTIMISATION                   ║
+╚════════════════════════════════════════════════════════════════╝
+
+✅ PROBLÈME RÉSOLU
+─────────────────────────────────────────────────────────────────
+Avant: 21GB RAM → LLM non responsive
+Après: 4-6GB RAM → LLM fonctionnel avec memory mapping
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 DÉMARRAGE RAPIDE
+─────────────────────────────────────────────────────────────────
+1. Arrêter l'ancien processus (si actif):
+   $ pkill -9 -f "streamlit run.*ERTest.py"
+
+2. Lancer avec optimisations:
+   $ ./start_setraf_optimized.sh
+   
+   OU manuellement:
+   $ streamlit run ERTest.py
+
+3. Ouvrir: http://localhost:8501
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚙️ CONFIGURATION DANS L'APP
+─────────────────────────────────────────────────────────────────
+Dans la sidebar → "🤖 Intelligence Artificielle":
+
+Option A (Actif par défaut):
+   ☑️ 🤖 Transformers + mmap (4-6GB RAM)
+   └─ Memory mapping + quantisation 4-bit
+   └─ Compatible immédiatement
+
+Option B (Si installé):
+   ☑️ 🔥 GGUF + llama.cpp (2-3GB RAM)
+   └─ Ultra-optimisé, nécessite:
+      $ ./install_llama_cpp.sh
+      $ cd models && wget [modèle GGUF]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔧 COMMANDES UTILES
+─────────────────────────────────────────────────────────────────
+• Démarrer optimisé:
+  $ ./start_setraf_optimized.sh
+
+• Surveiller mémoire:
+  $ ./monitor_memory.sh
+
+• Voir les logs:
+  $ tail -f setraf_output.log
+
+• Arrêter:
+  $ pkill -f "streamlit run.*ERTest.py"
+
+• Vérifier RAM:
+  $ free -h
+
+• Voir processus:
+  $ ps aux | grep streamlit
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 UTILISATION MÉMOIRE ATTENDUE
+─────────────────────────────────────────────────────────────────
+Au démarrage (sans LLM):     ~500MB
+Après chargement LLM:         4-6GB   (Transformers+mmap)
+                              2-3GB   (GGUF)
+Pendant génération:           +200-500MB (temporaire)
+Après nettoyage auto:         Retour au niveau de base
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 NOUVELLES FONCTIONNALITÉS
+─────────────────────────────────────────────────────────────────
+✅ Bouton "🗑️ Décharger LLM" dans sidebar
+   └─ Libère la mémoire manuellement
+
+✅ Affichage RAM en temps réel
+   └─ Voir l'usage actuel dans sidebar
+
+✅ Nettoyage automatique
+   └─ Après chaque génération LLM
+
+✅ Choix du type de modèle
+   └─ GGUF ou Transformers
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ DÉPANNAGE
+─────────────────────────────────────────────────────────────────
+Problème: "Mémoire insuffisante"
+Solution: 
+  1. Arrêter les autres applications
+  2. Redémarrer SETRAF
+  3. Utiliser GGUF si disponible
+
+Problème: "LLM ne répond pas"
+Solution:
+  1. Vérifier logs: tail -f setraf_output.log
+  2. Vérifier RAM: free -h
+  3. Cliquer "🗑️ Décharger LLM" puis recharger
+
+Problème: "Application lente"
+Solution:
+  1. Décocher "🖼️ CLIP" si activé
+  2. Utiliser GGUF au lieu de Transformers
+  3. Augmenter swap: sudo swapon
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 DOCUMENTATION COMPLÈTE
+─────────────────────────────────────────────────────────────────
+$ cat MEMORY_OPTIMIZATION_README.md
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 Vous êtes maintenant prêt à utiliser SETRAF avec optimisations !
+   L'application devrait maintenant fonctionner avec 4-6GB de RAM.
+   
+   Bonne analyse géophysique ! 🌍💧
