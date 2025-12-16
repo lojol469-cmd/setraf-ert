@@ -7,7 +7,12 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Réduit les logs TensorFlow
 import streamlit as st
 import pandas as pd
 import numpy as np
+
+# Configuration Matplotlib pour stabilité et performance
+import matplotlib
+matplotlib.use('Agg')  # Backend non-interactif pour éviter les reruns
 import matplotlib.pyplot as plt
+plt.ioff()  # Désactiver le mode interactif
 from matplotlib.colors import LogNorm
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.cluster import KMeans
@@ -4625,7 +4630,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                 ax.grid(True, alpha=0.3)
                 plt.xticks(rotation=45)
                 plt.tight_layout()
-                st.pyplot(fig_time)
+                st.pyplot(fig_time, clear_figure=True, use_container_width=True)
                 
                 # Sauvegarder pour PDF
                 figures_dict['temporal_evolution'] = fig_time
@@ -4667,7 +4672,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
             ax.set_title(f'Classification en {n_clusters} groupes', fontsize=13, fontweight='bold')
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
-            st.pyplot(fig_cluster)
+            st.pyplot(fig_cluster, clear_figure=True, use_container_width=True)
             
             # Sauvegarder pour PDF
             figures_dict['kmeans_clustering'] = fig_cluster
@@ -4738,7 +4743,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                 ax_water.grid(True, alpha=0.3, linestyle='--', color='white', linewidth=0.5)
                 plt.tight_layout()
                 
-                st.pyplot(fig_water)
+                st.pyplot(fig_water, clear_figure=True, use_container_width=True)
                 
                 # Sauvegarder pour PDF
                 figures_dict['water_level_section'] = fig_water
@@ -4825,7 +4830,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                 ax_cbar.axvline(pos, color='white', linewidth=2, linestyle='--', alpha=0.8)
             
             plt.tight_layout()
-            st.pyplot(fig_cbar)
+            st.pyplot(fig_cbar, clear_figure=True, use_container_width=True)
             plt.close()
             
             # Coupe 1: Zone Eau de Mer (0.1 - 1 Ω·m)
@@ -4884,7 +4889,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     ax_sea.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_sea)
+                    st.pyplot(fig_sea, clear_figure=True, use_container_width=True)
                     figures_dict['seawater_section'] = fig_sea
                     
                     # Générer explication dynamique avec le LLM
@@ -4972,7 +4977,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     ax_saline.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_saline)
+                    st.pyplot(fig_saline, clear_figure=True, use_container_width=True)
                     figures_dict['saline_section'] = fig_saline
                     
                     # Générer explication dynamique avec le LLM
@@ -5059,7 +5064,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     ax_fresh.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_fresh)
+                    st.pyplot(fig_fresh, clear_figure=True, use_container_width=True)
                     figures_dict['freshwater_section'] = fig_fresh
                     
                     # Générer explication dynamique avec le LLM
@@ -5146,7 +5151,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     ax_pure.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     ax_pure.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     plt.tight_layout()
-                    st.pyplot(fig_pure)
+                    st.pyplot(fig_pure, clear_figure=True, use_container_width=True)
                     figures_dict['purewater_section'] = fig_pure
                     
                     # Générer explication dynamique avec le LLM
@@ -5275,7 +5280,7 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                 ax_pseudo.legend(loc='upper right', fontsize=10, framealpha=0.9)
                 
                 plt.tight_layout()
-                st.pyplot(fig_pseudo)
+                st.pyplot(fig_pseudo, clear_figure=True, use_container_width=True)
                 plt.close()
                 
                 # Statistiques
@@ -5457,7 +5462,7 @@ La couleur d'un point sur la pseudo-section représente donc la valeur de la ré
         ax.grid(True, alpha=0.3, linestyle='--')
         plt.tight_layout()
         
-        st.pyplot(fig_real)
+        st.pyplot(fig_real, clear_figure=True, use_container_width=True)
         
         # Sauvegarder pour PDF
         figures_tab3['pseudo_section_2d'] = fig_real
@@ -5613,7 +5618,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
                 fig_comp1.colorbar(pcm2, ax=ax2, label='Résistivité mesurée (Ω.m)')
             
             plt.tight_layout()
-            st.pyplot(fig_comp1)
+            st.pyplot(fig_comp1, clear_figure=True, use_container_width=True)
             figures_tab3['comparative_1'] = fig_comp1
             
             st.markdown("""
@@ -5697,7 +5702,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
                          fontsize=8, va='top')
             
             plt.tight_layout()
-            st.pyplot(fig_comp2)
+            st.pyplot(fig_comp2, clear_figure=True, use_container_width=True)
             figures_tab3['comparative_2'] = fig_comp2
             
             st.markdown("""
@@ -5825,7 +5830,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
             ax_pseudo_t3.legend(loc='upper right', fontsize=10, framealpha=0.9)
             
             plt.tight_layout()
-            st.pyplot(fig_pseudo_t3)
+            st.pyplot(fig_pseudo_t3, clear_figure=True, use_container_width=True)
             plt.close()
             
             # Statistiques
@@ -5974,7 +5979,7 @@ with tab4:
                                 cbar_strat.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
                                 
                                 plt.tight_layout()
-                                st.pyplot(fig_strat)
+                                st.pyplot(fig_strat, clear_figure=True, use_container_width=True)
                                 plt.close()
                             else:
                                 st.info(f"✓ {len(df_filtered)} mesure(s) détectée(s) mais insuffisantes pour interpolation")
@@ -6038,7 +6043,7 @@ with tab4:
             cbar_dist.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
             
             plt.tight_layout()
-            st.pyplot(fig_dist)
+            st.pyplot(fig_dist, clear_figure=True, use_container_width=True)
             plt.close()
             
             st.markdown("---")
@@ -6346,7 +6351,7 @@ with tab4:
                     ax_pseudo_t4.legend(loc='upper right', fontsize=10, framealpha=0.9)
                     
                     plt.tight_layout()
-                    st.pyplot(fig_pseudo_t4)
+                    st.pyplot(fig_pseudo_t4, clear_figure=True, use_container_width=True)
                     plt.close()
                     
                     # Statistiques
@@ -6529,7 +6534,7 @@ with tab5:
             cbar_freq.set_label('Résistivité (Ω·m)', fontsize=11, fontweight='bold')
             
             plt.tight_layout()
-            st.pyplot(fig_freq_pseudo)
+            st.pyplot(fig_freq_pseudo, clear_figure=True, use_container_width=True)
             plt.close()
             
             # Légende d'interprétation
@@ -6574,7 +6579,7 @@ with tab5:
             ax_prof.legend(loc='best', fontsize=10)
             
             plt.tight_layout()
-            st.pyplot(fig_freq_profile)
+            st.pyplot(fig_freq_profile, clear_figure=True, use_container_width=True)
             plt.close()
             
             # ========== 3 COUPES GÉOLOGIQUES SUPPLÉMENTAIRES DU SOUS-SOL ==========
@@ -6649,7 +6654,7 @@ with tab5:
                 cbar_geo1.set_label('Type d\'Eau', fontsize=11, fontweight='bold')
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo1)
+                st.pyplot(fig_geo1, clear_figure=True, use_container_width=True)
                 plt.close()
                 
                 st.markdown("""
@@ -6705,7 +6710,7 @@ with tab5:
                 cbar_2b.set_label('|∂ρ/∂z|', fontsize=10, fontweight='bold')
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo2)
+                st.pyplot(fig_geo2, clear_figure=True, use_container_width=True)
                 plt.close()
                 
                 st.markdown(f"""
@@ -6886,7 +6891,7 @@ with tab5:
                              fontsize=8, framealpha=0.9, ncol=1)
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo3)
+                st.pyplot(fig_geo3, clear_figure=True, use_container_width=True)
                 plt.close()
                 
                 # TABLEAU DÉTAILLÉ DES FORMATIONS PRÉSENTES
@@ -7172,7 +7177,7 @@ with tab5:
                 plt.tight_layout()
                 
                 # Afficher
-                st.pyplot(fig_pseudo)
+                st.pyplot(fig_pseudo, clear_figure=True, use_container_width=True)
                 plt.close()
                 
                 # Statistiques de la pseudo-section
@@ -7412,7 +7417,7 @@ with tab5:
                              bbox_to_anchor=(1.02, 0.5), fontsize=8, framealpha=0.95)
                 
                 plt.tight_layout()
-                st.pyplot(fig_grid)
+                st.pyplot(fig_grid, clear_figure=True, use_container_width=True)
                 plt.close()
                 
                 # Tableau statistique par profondeur
@@ -7629,7 +7634,7 @@ with tab5:
                         cbar.ax.set_yticklabels(['0.1-1', '1-10', '10-100', '> 100'])
 
                         plt.tight_layout()
-                        st.pyplot(fig_pygimli)
+                        st.pyplot(fig_pygimli, clear_figure=True, use_container_width=True)
                         plt.close()
 
                         # ========== 4 COUPES INVERSÉES SUPPLÉMENTAIRES ==========
@@ -7663,7 +7668,7 @@ with tab5:
                             cbar_inv1.set_label('Résistivité vraie (Ω·m)', fontsize=11, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv1)
+                            st.pyplot(fig_inv1, clear_figure=True, use_container_width=True)
                             plt.close()
                             
                             st.markdown(
@@ -7716,7 +7721,7 @@ with tab5:
                             cbar_inv2.set_label('Type d\'Eau', fontsize=11, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv2)
+                            st.pyplot(fig_inv2, clear_figure=True, use_container_width=True)
                             plt.close()
                             
                             st.markdown("**Interprétation hydrogéologique VRAIE (après inversion, selon tableau) :**\n"
@@ -7767,7 +7772,7 @@ with tab5:
                             cbar_3b.set_label('|∂ρ/∂x|', fontsize=10, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv3)
+                            st.pyplot(fig_inv3, clear_figure=True, use_container_width=True)
                             plt.close()
                             
                             st.markdown(f"**Interprétation des gradients horizontaux :**\n"
@@ -7841,7 +7846,7 @@ with tab5:
                                          fontsize=8, framealpha=0.9, ncol=1)
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv4)
+                            st.pyplot(fig_inv4, clear_figure=True, use_container_width=True)
                             plt.close()
                             
                             st.markdown("**Modèle lithologique VRAI (après inversion pyGIMLi) :**\n\n"
@@ -7923,7 +7928,7 @@ with tab5:
                         ax_classif.legend(handles=legend_elements, loc='upper right')
 
                         plt.tight_layout()
-                        st.pyplot(fig_classif)
+                        st.pyplot(fig_classif, clear_figure=True, use_container_width=True)
 
                         # Export CSV interprété
                         csv_buffer = io.StringIO()
@@ -8859,7 +8864,7 @@ with tab6:
                     plt.colorbar(scatter, ax=ax2, label='Résistivité (Ω·m)')
 
                     plt.tight_layout()
-                    st.pyplot(fig_spectra)
+                    st.pyplot(fig_spectra, clear_figure=True, use_container_width=True)
                     
                     # Explication DYNAMIQUE générée par le LLM
                     st.markdown("### 📖 Analyse Automatique (LLM)")
@@ -9164,7 +9169,7 @@ with tab6:
                             plt.colorbar(im3, ax=ax3, label='Δρ (Ω·m)')
 
                             plt.tight_layout()
-                            st.pyplot(fig_impute)
+                            st.pyplot(fig_impute, clear_figure=True, use_container_width=True)
                             
                             # Message de transition
                             st.success("✅ Visualisation générée - Démarrage de l'analyse IA...")
@@ -9386,7 +9391,7 @@ RÉPONDS EN FRANÇAIS. Simple, pédagogique, sans jargon. [/INST]"""
                         ax4.set_ylabel('Amplitude')
 
                         plt.tight_layout()
-                        st.pyplot(fig_forward)
+                        st.pyplot(fig_forward, clear_figure=True, use_container_width=True)
                         
                         # Explication DYNAMIQUE générée par le LLM
                         st.markdown("### 📖 Explication Automatique (LLM)")
@@ -9549,7 +9554,7 @@ RÉPONDS EN FRANÇAIS. Simple, pédagogique, sans jargon. [/INST]"""
                         axes[1,1].set_yscale('log')
 
                         plt.tight_layout()
-                        st.pyplot(fig_reconstruct)
+                        st.pyplot(fig_reconstruct, clear_figure=True, use_container_width=True)
                         
                         # Analyse DYNAMIQUE avec CLIP + LLM
                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -9732,7 +9737,7 @@ Lambda régularisation: {lambda_tikhonov}
                                         generated_img_3d,
                                         title=f"Reconstruction 3D - {slice_type} ({depth_str})"
                                     )
-                                    st.pyplot(fig_comp_3d)
+                                    st.pyplot(fig_comp_3d, clear_figure=True, use_container_width=True)
                                     
                                     # Afficher le prompt
                                     with st.expander("📝 Prompt utilisé"):
@@ -9914,7 +9919,7 @@ Lambda régularisation: {lambda_tikhonov}
                             axes[2].grid(True, alpha=0.3)
 
                         plt.tight_layout()
-                        st.pyplot(fig_trajectories)
+                        st.pyplot(fig_trajectories, clear_figure=True, use_container_width=True)
                         
                         # Analyse DYNAMIQUE avec CLIP + LLM
                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -10053,7 +10058,7 @@ Dimensions: {n_x}×{n_y}×{n_z}
                                             traj_generated_img,
                                             title=f"Trajectoires Détectées - {traj_emphasis}"
                                         )
-                                        st.pyplot(fig_traj_comparison)
+                                        st.pyplot(fig_traj_comparison, clear_figure=True, use_container_width=True)
                                         
                                         # Analyse DYNAMIQUE avec CLIP + LLM
                                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -10914,7 +10919,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=None,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe1)
+                            st.pyplot(fig_coupe1, clear_figure=True, use_container_width=True)
                             
                             st.success(f"✅ Coupe 1 générée : {len(spectra):,} mesures de résistivité visualisées")
                         
@@ -10935,7 +10940,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=interpretation_for_plot,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe2)
+                            st.pyplot(fig_coupe2, clear_figure=True, use_container_width=True)
                             
                             st.success(f"✅ Coupe 2 générée : Reconstruction 3D avec {rho_3d.size:,} cellules")
                         elif rho_imputed is not None:
@@ -10946,7 +10951,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=interpretation_for_plot if show_interpretation else None,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe2)
+                            st.pyplot(fig_coupe2, clear_figure=True, use_container_width=True)
                             
                             st.success(f"✅ Coupe 2 générée : Données imputées avec {rho_imputed.size:,} cellules")
                         
