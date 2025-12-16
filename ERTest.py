@@ -49,10 +49,11 @@ AUTH_ENABLED = False
 # GÉNÉRATION DE COUPES GÉOLOGIQUES RÉALISTES AVEC PYGIMLI
 # ═══════════════════════════════════════════════════════════════
 
-# Configuration des chemins de modèles LOCAUX dans le dossier SETRAF
+# Configuration des modèles depuis Hugging Face Hub (optimisé pour Spaces)
 SETRAF_BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-MISTRAL_MODEL_PATH = os.path.join(SETRAF_BASE_PATH, "models/mistral-7b")
-CLIP_MODEL_PATH = os.path.join(SETRAF_BASE_PATH, "models/clip")
+# Utiliser des modèles légers compatibles avec HF Spaces
+MISTRAL_MODEL_PATH = "microsoft/Phi-3-mini-4k-instruct"  # Modèle léger 3.8B, rapide et efficace
+CLIP_MODEL_PATH = "openai/clip-vit-base-patch32"  # CLIP standard
 
 # ═══════════════════════════════════════════════════════════════
 # SYSTÈME RAG (Retrieval-Augmented Generation) POUR GÉOPHYSIQUE ERT
@@ -62,8 +63,8 @@ CLIP_MODEL_PATH = os.path.join(SETRAF_BASE_PATH, "models/clip")
 RAG_DOCUMENTS_PATH = os.path.join(SETRAF_BASE_PATH, "rag_documents")
 VECTOR_DB_PATH = os.path.join(SETRAF_BASE_PATH, "vector_db")
 ML_MODELS_PATH = os.path.join(SETRAF_BASE_PATH, "ml_models")
-HF_TOKEN = "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"
-TAVILY_API_KEY = "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"
+HF_TOKEN = os.getenv("HF_TOKEN", "")  # Use environment variable for security
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")  # Use environment variable for security
 
 class ERTKnowledgeBase:
     """
@@ -96,36 +97,27 @@ class ERTKnowledgeBase:
         self._load_dat_registry()
 
     def initialize_embeddings(self):
-        """Initialise le modèle d'embeddings OPTIMISÉ"""
+        """Initialise le modèle d'embeddings OPTIMISÉ depuis HF Hub"""
         try:
             import torch
             import os
             
             # Désactiver complètement PyTorch meta device
             os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
-            torch.set_default_device('cpu')
             
             from sentence_transformers import SentenceTransformer
-            import faiss
 
-            st.info("🔄 Chargement rapide du modèle d'embeddings...")
+            st.info("🔄 Chargement du modèle d'embeddings depuis HF Hub...")
 
-            # Chemin local du modèle d'embeddings
-            embeddings_path = os.path.join(SETRAF_BASE_PATH, "models/embeddings/sentence-transformers--all-MiniLM-L6-v2")
+            # Utiliser un modèle léger directement depuis HuggingFace Hub
+            model_name = "sentence-transformers/all-MiniLM-L6-v2"
             
-            # Vérifier si le modèle existe localement
-            if not os.path.exists(embeddings_path):
-                st.error(f"❌ Modèle d'embeddings non trouvé : {embeddings_path}")
-                st.info("💡 Copiez le modèle depuis le cache HuggingFace ou téléchargez-le")
-                return False
-            
-            # Charger directement sur CPU depuis le dossier local
+            # Charger directement depuis HF Hub
             self.embeddings = SentenceTransformer(
-                embeddings_path,
+                model_name,
                 device='cpu'
             )
             
-            # NE PAS utiliser .to() - déjà sur CPU
             self.embeddings.eval()  # Mode évaluation
 
             # Optimisations pour la vitesse
@@ -135,10 +127,10 @@ class ERTKnowledgeBase:
             with torch.no_grad():
                 _ = self.embeddings.encode(["test"], show_progress_bar=False, convert_to_numpy=True)
             
-            st.success("✅ Modèle d'embeddings rapide chargé !")
+            st.success("✅ Modèle d'embeddings chargé depuis HF Hub !")
             return True
         except Exception as e:
-            st.warning(f"⚠️ Impossible de charger les embeddings : {str(e)}")
+            st.warning(f"⚠️ Impossible de charger les embeddings : {str(e)[:100]}")
             return False
 
     def load_or_create_vectorstore(self):
@@ -2103,17 +2095,16 @@ def load_mistral_llm(use_cpu=True, quantize=True):
         import torch
         import gc
         
-        st.info("🤖 Chargement MÉMOIRE-OPTIMISÉ du LLM (évite crash)...")
+        st.info("🤖 Chargement du modèle LLM léger (Phi-3-mini)...")
         
         # NETTOYER LA MÉMOIRE AVANT CHARGEMENT
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
-        # Charger le tokenizer (léger)
+        # Charger le tokenizer depuis Hugging Face Hub
         tokenizer = AutoTokenizer.from_pretrained(
             MISTRAL_MODEL_PATH,
-            local_files_only=True,
             trust_remote_code=True,
             use_fast=True
         )
@@ -2125,53 +2116,53 @@ def load_mistral_llm(use_cpu=True, quantize=True):
         torch.set_num_threads(4)  # Réduit à 4 threads pour économie mémoire
         torch.set_grad_enabled(False)
         
-        st.info("📦 Chargement du modèle avec quantization 8-bit (économie 50% RAM)...")
+        st.info("📦 Chargement du modèle optimisé...")
         
-        # Charger avec QUANTIZATION 8-bit pour économiser RAM
+        # Déterminer le dtype (float16 uniquement pour GPU)
+        device_available = torch.cuda.is_available()
+        dtype = torch.float16 if (device_available and quantize) else torch.float32
+        
+        # Charger le modèle depuis Hugging Face Hub
         try:
-            # Essayer avec quantization 8-bit d'abord
+            # Phi-3-mini est un modèle léger (3.8B) parfait pour HF Spaces
             model = AutoModelForCausalLM.from_pretrained(
                 MISTRAL_MODEL_PATH,
-                local_files_only=True,
-                torch_dtype=torch.float16 if quantize else torch.float32,  # float16 économise 50% RAM
+                torch_dtype=dtype,
                 trust_remote_code=True,
                 low_cpu_mem_usage=True,
-                max_memory={0: "4GB", "cpu": "8GB"}  # Limiter usage mémoire
+                device_map="auto"
             )
         except Exception as e:
-            st.warning(f"⚠️ Quantization échouée, chargement standard : {str(e)[:50]}")
-            # Fallback : chargement standard
+            st.warning(f"⚠️ Chargement optimisé échoué, mode standard : {str(e)[:100]}")
+            # Fallback : chargement standard avec float32 obligatoire
             model = AutoModelForCausalLM.from_pretrained(
                 MISTRAL_MODEL_PATH,
-                local_files_only=True,
                 torch_dtype=torch.float32,
                 trust_remote_code=True,
                 low_cpu_mem_usage=True
             )
         
-        # CPU seulement
-        model = model.to('cpu')
+        # device_map="auto" gère déjà le placement, pas besoin de .to()
         model.eval()
         
         # Nettoyer à nouveau
         gc.collect()
         
-        # Pipeline MINIMAL
+        # Pipeline MINIMAL (device géré automatiquement par accelerate)
         llm_pipeline = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            device=-1,
             framework="pt",
             batch_size=1
         )
         
-        st.success("✅ LLM chargé avec économie mémoire activée !")
+        st.success("✅ LLM Phi-3-mini chargé avec succès !")
         return llm_pipeline
         
     except Exception as e:
         st.error(f"❌ Erreur chargement LLM : {str(e)[:200]}")
-        st.warning("💡 Le modèle Mistral-7B nécessite ~14GB RAM. Utilisez le mode fallback.")
+        st.warning("💡 LLM non disponible. L'application fonctionnera sans analyses IA avancées.")
         return None
 
 def load_mistral_llm_basic(use_cpu=True):
@@ -2182,15 +2173,14 @@ def load_mistral_llm_basic(use_cpu=True):
         
         tokenizer = AutoTokenizer.from_pretrained(
             MISTRAL_MODEL_PATH,
-            local_files_only=True,
             trust_remote_code=True
         )
         device = "cpu" if use_cpu else ("cuda" if torch.cuda.is_available() else "cpu")
         
         model = AutoModelForCausalLM.from_pretrained(
             MISTRAL_MODEL_PATH,
-            local_files_only=True,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.float32,
+            trust_remote_code=True,
             low_cpu_mem_usage=True
         ).to(device)
         
@@ -4098,56 +4088,71 @@ if 'llm_pipeline' not in st.session_state:
     st.session_state.clip_loaded = False
     st.session_state.use_clip = False  # Par défaut désactivé
     st.session_state.explanation_cache = {}  # Cache des explications
+    st.session_state.enable_llm = True  # Mode LLM activé par défaut
 
-# OPTIONS DE PERFORMANCE (après initialisation du session_state)
-use_clip = st.sidebar.checkbox("🖼️ Activer CLIP (analyse visuelle)", value=st.session_state.use_clip, 
-                               help="⚠️ CLIP est lent ! Désactivez pour des explications plus rapides (LLM seul)")
-st.session_state.use_clip = use_clip
+# ===== MODE RAPIDE : OPTION POUR DÉSACTIVER LE LLM =====
+st.sidebar.markdown("### ⚡ Mode de Performance")
+enable_llm = st.sidebar.checkbox(
+    "🤖 Activer le LLM (analyses IA)", 
+    value=st.session_state.get('enable_llm', True),
+    help="✅ Activé : Analyses IA complètes avec Phi-3-mini\n❌ Désactivé : Interprétation rapide sans IA"
+)
+st.session_state.enable_llm = enable_llm
 
-# Chargement automatique au premier lancement
-if not st.session_state.llm_loaded and not st.session_state.llm_loading_attempted:
-    st.session_state.llm_loading_attempted = True
-    with st.sidebar.status("🤖 Chargement automatique du LLM Mistral...", expanded=True) as status:
-        try:
-            st.sidebar.write("📥 Initialisation du modèle LLM...")
-            st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
-            st.session_state.llm_loaded = True
-            
-            # CLIP chargé seulement si l'utilisateur le demande (option checkbox)
-            if use_clip and not st.session_state.clip_loaded:
-                st.sidebar.write("🖼️ Chargement du modèle CLIP...")
-                clip_model, clip_processor, clip_device = load_clip_model()
-                st.session_state.clip_model = clip_model
-                st.session_state.clip_processor = clip_processor
-                st.session_state.clip_device = clip_device
-                st.session_state.clip_loaded = (clip_model is not None)
-            
-            status.update(label="✅ LLM chargé avec succès !", state="complete")
-            st.sidebar.success("💡 Analyses IA activées (LLM Mistral)")
-            
-            # INITIALISER LE SYSTÈME RAG APRÈS LE LLM - VERSION OPTIMISÉE
-            st.sidebar.write("📚 Initialisation ultra-rapide du système RAG...")
+if not enable_llm:
+    st.sidebar.info("⚡ Mode Rapide : LLM désactivé\nInterprétation basique uniquement")
+    # Ne pas charger le LLM en mode rapide
+    st.session_state.llm_loaded = False
+else:
+    # OPTIONS DE PERFORMANCE (après initialisation du session_state)
+    use_clip = st.sidebar.checkbox("🖼️ Activer CLIP (analyse visuelle)", value=st.session_state.use_clip, 
+                                   help="⚠️ CLIP est lent ! Désactivez pour des explications plus rapides (LLM seul)")
+    st.session_state.use_clip = use_clip
+
+    # Chargement automatique au premier lancement
+    if not st.session_state.llm_loaded and not st.session_state.llm_loading_attempted:
+        st.session_state.llm_loading_attempted = True
+        with st.sidebar.status("🤖 Chargement automatique du LLM Mistral...", expanded=True) as status:
             try:
-                rag_initialized = initialize_rag_system()
-                if rag_initialized:
-                    st.sidebar.success("✅ Système RAG actif - Connaissances enrichies")
-                else:
-                    st.sidebar.warning("⚠️ RAG non disponible - Mode LLM seul")
-            except Exception as rag_error:
-                st.sidebar.warning(f"⚠️ Erreur RAG : {str(rag_error)[:30]}")
+                st.sidebar.write("📥 Initialisation du modèle LLM...")
+                st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
+                st.session_state.llm_loaded = True
                 
-        except Exception as e:
-            status.update(label="❌ Erreur de chargement", state="error")
-            st.sidebar.error(f"⚠️ LLM non disponible : {str(e)[:100]}")
-            st.sidebar.info("L'application continuera avec analyses basiques")
+                # CLIP chargé seulement si l'utilisateur le demande (option checkbox)
+                if use_clip and not st.session_state.clip_loaded:
+                    st.sidebar.write("🖼️ Chargement du modèle CLIP...")
+                    clip_model, clip_processor, clip_device = load_clip_model()
+                    st.session_state.clip_model = clip_model
+                    st.session_state.clip_processor = clip_processor
+                    st.session_state.clip_device = clip_device
+                    st.session_state.clip_loaded = (clip_model is not None)
+                
+                status.update(label="✅ LLM chargé avec succès !", state="complete")
+                st.sidebar.success("💡 Analyses IA activées (LLM Mistral)")
+                
+                # INITIALISER LE SYSTÈME RAG APRÈS LE LLM - VERSION OPTIMISÉE
+                st.sidebar.write("📚 Initialisation ultra-rapide du système RAG...")
+                try:
+                    rag_initialized = initialize_rag_system()
+                    if rag_initialized:
+                        st.sidebar.success("✅ Système RAG actif - Connaissances enrichies")
+                    else:
+                        st.sidebar.warning("⚠️ RAG non disponible - Mode LLM seul")
+                except Exception as rag_error:
+                    st.sidebar.warning(f"⚠️ Erreur RAG : {str(rag_error)[:30]}")
+                        
+            except Exception as e:
+                status.update(label="❌ Erreur de chargement", state="error")
+                st.sidebar.error(f"⚠️ LLM non disponible : {str(e)[:100]}")
+                st.sidebar.info("L'application continuera avec analyses basiques")
 
-# Afficher l'état et permettre rechargement manuel
-if st.session_state.llm_loaded:
-    st.sidebar.success("✅ LLM Mistral actif - Analyses intelligentes activées")
-    if st.session_state.clip_loaded and use_clip:
-        st.sidebar.success("✅ CLIP actif - Analyse visuelle activée")
-    elif use_clip and not st.session_state.clip_loaded:
-        st.sidebar.info("⏳ Cochez la case pour charger CLIP")
+    # Afficher l'état et permettre rechargement manuel
+    if st.session_state.llm_loaded:
+        st.sidebar.success("✅ LLM Mistral actif - Analyses intelligentes activées")
+        if st.session_state.clip_loaded and use_clip:
+            st.sidebar.success("✅ CLIP actif - Analyse visuelle activée")
+        elif use_clip and not st.session_state.clip_loaded:
+            st.sidebar.info("⏳ Cochez la case pour charger CLIP")
     
     # SYSTÈME RAG
     st.sidebar.markdown("---")
@@ -4263,11 +4268,12 @@ if st.session_state.llm_loaded:
         st.session_state.clip_loaded = False
         st.session_state.explanation_cache = {}
         st.rerun()
-else:
-    st.sidebar.warning("⚠️ LLM non chargé - Analyses basiques uniquement")
-    if st.sidebar.button("🚀 Réessayer le chargement"):
-        st.session_state.llm_loading_attempted = False
-        st.rerun()
+    
+    else:
+        st.sidebar.warning("⚠️ LLM non chargé - Analyses basiques uniquement")
+        if st.sidebar.button("🚀 Réessayer le chargement"):
+            st.session_state.llm_loading_attempted = False
+            st.rerun()
 
 # Bouton de téléchargement de la thèse doctorale
 st.sidebar.markdown("---")
@@ -4480,96 +4486,25 @@ with tab2:
             
             # 💬 CHAT INTERACTIF AVEC L'IA SUR LES DONNÉES
             st.markdown("---")
-            st.subheader("💬 Discuter avec l'IA")
+            st.subheader("💬 Discussion IA sur les données")
             
             if st.session_state.get('llm_loaded', False):
-                # Initialiser l'historique de chat
-                if 'chat_messages' not in st.session_state:
-                    st.session_state.chat_messages = []
+                st.info("ℹ️ **Utilisez le chat en bas de page** pour discuter avec l'IA sur vos données.")
                 
-                # Afficher les messages
-                for message in st.session_state.chat_messages:
-                    with st.chat_message(message["role"]):
-                        st.markdown(message["content"])
+                # Sauvegarder le contexte pour le chat global
+                if 'current_data_context' not in st.session_state:
+                    st.session_state['current_data_context'] = {}
                 
-                # Zone de saisie
-                user_question = st.chat_input("Posez une question (scientifique, technique, interprétation...)")
-                
-                if user_question:
-                    st.session_state.chat_messages.append({"role": "user", "content": user_question})
-                    
-                    # Contexte MINIMAL et RAPIDE
-                    context = f"""Fichier: {uploaded_file.name}
-Mesures: {len(df)} sur {df['survey_point'].nunique()} points
-Résistivité: {df['data'].min():.1f}-{df['data'].max():.1f} {unit}
-Moyenne: {df['data'].mean():.1f}, Médiane: {df['data'].median():.1f}"""
-                    
-                    # Prompt court et direct
-                    prompt = f"""[INST] Expert géophysique. Données ERT:
-{context}
-
-Question: {user_question}
-
-Réponds en français, concis (100-200 mots). [/INST]"""
-                    
-                    with st.chat_message("assistant"):
-                        message_placeholder = st.empty()
-                        
-                        # Afficher indicateur pendant génération
-                        message_placeholder.info("🧠 Génération en cours...")
-                        
-                        # Génération directe SANS délai
-                        try:
-                            result = st.session_state.llm_pipeline(
-                                prompt,
-                                max_new_tokens=200,  # Réduit de 400 à 200 pour vitesse
-                                temperature=0.7,
-                                do_sample=True,
-                                return_full_text=False
-                            )
-                            
-                            if result and len(result) > 0:
-                                full_response = result[0].get('generated_text', '')
-                                
-                                # Extraire après [/INST] si présent
-                                if '[/INST]' in full_response:
-                                    full_response = full_response.split('[/INST]')[-1].strip()
-                                
-                                # Afficher directement SANS délai
-                                message_placeholder.markdown(full_response)
-                            else:
-                                full_response = "Désolé, je n'ai pas pu générer de réponse."
-                                message_placeholder.markdown(full_response)
-                            
-                        except Exception as e:
-                            full_response = f"❌ Erreur: {str(e)[:100]}"
-                            message_placeholder.markdown(full_response)
-                    
-                    st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
-                    st.rerun()
-                
-                # Boutons d'action
-                col_clear, col_export = st.columns([1, 1])
-                with col_clear:
-                    if st.session_state.chat_messages and st.button("🗑️ Effacer la conversation"):
-                        st.session_state.chat_messages = []
-                        st.rerun()
-                
-                with col_export:
-                    if st.session_state.chat_messages and st.button("💾 Exporter la conversation"):
-                        conversation_text = ""
-                        for msg in st.session_state.chat_messages:
-                            role = "**Vous**" if msg["role"] == "user" else "**Assistant IA**"
-                            conversation_text += f"{role}:\n{msg['content']}\n\n---\n\n"
-                        
-                        st.download_button(
-                            label="📥 Télécharger (TXT)",
-                            data=conversation_text,
-                            file_name=f"conversation_ert_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                            mime="text/plain"
-                        )
+                st.session_state['current_data_context'] = {
+                    'filename': uploaded_file.name,
+                    'n_measures': len(df),
+                    'n_points': df['survey_point'].nunique(),
+                    'resistivity_range': f"{df['data'].min():.1f}-{df['data'].max():.1f} {unit}",
+                    'mean': f"{df['data'].mean():.1f}",
+                    'median': f"{df['data'].median():.1f}"
+                }
             else:
-                st.info("💡 Chargez le LLM pour activer le chat")
+                st.info("💡 Chargez le LLM pour activer le chat IA")
             
             st.markdown("---")
             
@@ -4751,12 +4686,10 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                 # Générer légende et explication dynamiques avec le LLM
                 st.markdown("### 📝 Interprétation Automatique (LLM)")
                 
-                # Charger le LLM si nécessaire
-                if 'llm_pipeline' not in st.session_state:
-                    with st.spinner("🤖 Chargement du LLM pour analyse..."):
-                        st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
-                
-                llm = st.session_state.get('llm_pipeline', None)
+                # Utiliser le LLM seulement si mode activé
+                llm = None
+                if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
+                    llm = st.session_state.get('llm_pipeline', None)
                 
                 if llm is not None:
                     with st.spinner("🧠 Génération de l'interprétation avec le LLM..."):
@@ -4804,34 +4737,38 @@ Réponds en français, concis (100-200 mots). [/INST]"""
             
             # Afficher une barre de couleur de la colormap personnalisée
             st.markdown("#### 🎨 Échelle de couleurs - Résistivité des eaux")
-            fig_cbar, ax_cbar = plt.subplots(figsize=(12, 1.5), dpi=100)
             
-            # Créer un gradient pour montrer la colormap
-            resistivity_values = np.logspace(-1, 3, 256).reshape(1, -1)  # 0.1 à 1000 Ω·m
-            im_cbar = ax_cbar.imshow(resistivity_values, cmap=WATER_CMAP, aspect='auto',
-                                     norm=LogNorm(vmin=0.1, vmax=1000))
-            
-            # Configuration de l'affichage
-            ax_cbar.set_yticks([])
-            ax_cbar.set_xlabel('Résistivité (Ω·m)', fontsize=11, fontweight='bold')
-            
-            # Ajouter des marqueurs pour les transitions
-            transitions = [0.1, 1, 10, 100, 1000]
-            trans_labels = ['0.1', '1\n(Eau mer)', '10\n(Eau salée)', '100\n(Eau douce)', '1000\n(Eau pure)']
-            trans_positions = [np.log10(t) - np.log10(0.1) for t in transitions]
-            trans_positions_norm = [p / (np.log10(1000) - np.log10(0.1)) * 255 for p in trans_positions]
-            
-            ax_cbar.set_xticks(trans_positions_norm)
-            ax_cbar.set_xticklabels(trans_labels, fontsize=9)
-            ax_cbar.set_xlim(0, 255)
-            
-            # Ajouter des lignes verticales pour les transitions
-            for pos in trans_positions_norm[1:-1]:
-                ax_cbar.axvline(pos, color='white', linewidth=2, linestyle='--', alpha=0.8)
-            
-            plt.tight_layout()
-            st.pyplot(fig_cbar, clear_figure=True, use_container_width=True)
-            plt.close()
+            try:
+                fig_cbar, ax_cbar = plt.subplots(figsize=(12, 1.5), dpi=100)
+                
+                # Créer un gradient pour montrer la colormap
+                resistivity_values = np.logspace(-1, 3, 256).reshape(1, -1)  # 0.1 à 1000 Ω·m
+                im_cbar = ax_cbar.imshow(resistivity_values, cmap=WATER_CMAP, aspect='auto',
+                                         norm=LogNorm(vmin=0.1, vmax=1000))
+                
+                # Configuration de l'affichage
+                ax_cbar.set_yticks([])
+                ax_cbar.set_xlabel('Résistivité (Ω·m)', fontsize=11, fontweight='bold')
+                
+                # Ajouter des marqueurs pour les transitions
+                transitions = [0.1, 1, 10, 100, 1000]
+                trans_labels = ['0.1', '1\n(Eau mer)', '10\n(Eau salée)', '100\n(Eau douce)', '1000\n(Eau pure)']
+                trans_positions = [np.log10(t) - np.log10(0.1) for t in transitions]
+                trans_positions_norm = [p / (np.log10(1000) - np.log10(0.1)) * 255 for p in trans_positions]
+                
+                ax_cbar.set_xticks(trans_positions_norm)
+                ax_cbar.set_xticklabels(trans_labels, fontsize=9)
+                ax_cbar.set_xlim(0, 255)
+                
+                # Ajouter des lignes verticales pour les transitions
+                for pos in trans_positions_norm[1:-1]:
+                    ax_cbar.axvline(pos, color='white', linewidth=2, linestyle='--', alpha=0.8)
+                
+                plt.tight_layout()
+                st.pyplot(fig_cbar, clear_figure=True, use_container_width=True)
+                plt.close(fig_cbar)
+            except Exception as e:
+                st.warning(f"⚠️ Erreur affichage échelle couleurs : {str(e)[:100]}")
             
             # Coupe 1: Zone Eau de Mer (0.1 - 1 Ω·m)
             with st.expander("🔴 Coupe 1 - Zone d'eau de mer (0.1 - 1 Ω·m)", expanded=False):
@@ -4892,17 +4829,15 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     st.pyplot(fig_sea, clear_figure=True, use_container_width=True)
                     figures_dict['seawater_section'] = fig_sea
                     
-                    # Générer explication dynamique avec le LLM
-                    if 'llm_pipeline' not in st.session_state:
-                        st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
-                    
-                    llm = st.session_state.get('llm_pipeline', None)
-                    
-                    if llm is not None:
-                        legend_sea, explanation_sea = generate_dynamic_legend_and_explanation(
-                            llm, df_sea, df_sea['data'].min(), df_sea['data'].max(), section_type="seawater"
-                        )
-                        st.markdown(f"""
+                    # Générer explication dynamique avec le LLM (seulement si activé)
+                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
+                        llm = st.session_state.get('llm_pipeline', None)
+                        
+                        if llm is not None:
+                            legend_sea, explanation_sea = generate_dynamic_legend_and_explanation(
+                                llm, df_sea, df_sea['data'].min(), df_sea['data'].max(), section_type="seawater"
+                            )
+                            st.markdown(f"""
 **Analyse automatique (LLM) - Zone eau de mer :**
 
 **Légende :**
@@ -4910,7 +4845,9 @@ Réponds en français, concis (100-200 mots). [/INST]"""
 
 **Interprétation :**
 {explanation_sea}
-                        """)
+                            """)
+                        else:
+                            st.info("💡 LLM non disponible - Analyses basiques uniquement")
                     else:
                         st.markdown(f"""
 **Caractéristiques mesurées :**
@@ -4980,11 +4917,10 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     st.pyplot(fig_saline, clear_figure=True, use_container_width=True)
                     figures_dict['saline_section'] = fig_saline
                     
-                    # Générer explication dynamique avec le LLM
-                    if 'llm_pipeline' not in st.session_state:
-                        st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
-                    
-                    llm = st.session_state.get('llm_pipeline', None)
+                    # Générer explication dynamique avec le LLM (si activé)
+                    llm = None
+                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
+                        llm = st.session_state.get('llm_pipeline', None)
                     
                     if llm is not None:
                         legend_saline, explanation_saline = generate_dynamic_legend_and_explanation(
@@ -5067,11 +5003,10 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     st.pyplot(fig_fresh, clear_figure=True, use_container_width=True)
                     figures_dict['freshwater_section'] = fig_fresh
                     
-                    # Générer explication dynamique avec le LLM
-                    if 'llm_pipeline' not in st.session_state:
-                        st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
-                    
-                    llm = st.session_state.get('llm_pipeline', None)
+                    # Générer explication dynamique avec le LLM (si activé)
+                    llm = None
+                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
+                        llm = st.session_state.get('llm_pipeline', None)
                     
                     if llm is not None:
                         legend_fresh, explanation_fresh = generate_dynamic_legend_and_explanation(
@@ -5154,11 +5089,10 @@ Réponds en français, concis (100-200 mots). [/INST]"""
                     st.pyplot(fig_pure, clear_figure=True, use_container_width=True)
                     figures_dict['purewater_section'] = fig_pure
                     
-                    # Générer explication dynamique avec le LLM
-                    if 'llm_pipeline' not in st.session_state:
-                        st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
-                    
-                    llm = st.session_state.get('llm_pipeline', None)
+                    # Générer explication dynamique avec le LLM (si activé)
+                    llm = None
+                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
+                        llm = st.session_state.get('llm_pipeline', None)
                     
                     if llm is not None:
                         legend_pure, explanation_pure = generate_dynamic_legend_and_explanation(
@@ -6959,35 +6893,6 @@ with tab5:
                     with col4:
                         depth_max_form = formations_df['depth_max'].max()
                         st.metric("Profondeur max explorée", f"{depth_max_form:.2f} m")
-                    
-                    # Recommandations spécifiques par formation
-                    st.markdown("### 🎯 Recommandations par Formation")
-                    
-                    for _, row in formations_df.iterrows():
-                        with st.expander(f"📍 {row['label']} ({row['percentage']:.1f}% du profil)", expanded=False):
-                            col_a, col_b = st.columns([2, 1])
-                            with col_a:
-                                st.markdown(f"""
-                                **Caractéristiques détectées :**
-                                - **Profondeur :** {row['depth_min']:.2f} à {row['depth_max']:.2f} m
-                                - **Résistivité moyenne :** {row['rho_mean']:.1f} Ω·m
-                                - **Plage mesurée :** {row['rho_min']:.1f} - {row['rho_max']:.1f} Ω·m
-                                - **Proportion du profil :** {row['percentage']:.1f}%
-                                """)
-                            
-                            with col_b:
-                                # Recommandation selon le type
-                                rho = row['rho_mean']
-                                if rho < 1:
-                                    st.error("🚫 À ÉVITER - Eau salée")
-                                elif rho < 20:
-                                    st.warning("⚠️ DIFFICILE - Argile imperméable")
-                                elif rho < 100:
-                                    st.success("✅ CIBLE PRIORITAIRE - Aquifère")
-                                elif rho < 500:
-                                    st.info("ℹ️ BON POTENTIEL - Formations perméables")
-                                else:
-                                    st.warning("⚠️ ROCHES DURES - Forage difficile")
                 
                 else:
                     st.warning("Aucune formation lithologique identifiée dans les données.")
@@ -7009,8 +6914,39 @@ with tab5:
                 - 🎯 **Zones optimales** : Sables moyens à graviers (50-200 Ω·m) = meilleurs aquifères
                 - 🌊 **Risque d'intrusion saline** : Zones rouges en surface ou peu profondes
                 """)
+        
+        # Recommandations par formation (HORS de l'expander pour éviter l'imbrication)
+        if formations_info:
+            st.markdown("### 🎯 Recommandations Détaillées par Formation")
+            st.info("💡 Cliquez sur chaque formation pour voir les recommandations spécifiques")
             
-            # ========== COUPE 4 - PSEUDO-SECTION RÉELLE (FORMAT CLASSIQUE) ==========
+            for _, row in formations_df.iterrows():
+                with st.expander(f"📍 {row['label']} ({row['percentage']:.1f}% du profil)", expanded=False):
+                    col_a, col_b = st.columns([2, 1])
+                    with col_a:
+                        st.markdown(f"""
+                        **Caractéristiques détectées :**
+                        - **Profondeur :** {row['depth_min']:.2f} à {row['depth_max']:.2f} m
+                        - **Résistivité moyenne :** {row['rho_mean']:.1f} Ω·m
+                        - **Plage mesurée :** {row['rho_min']:.1f} - {row['rho_max']:.1f} Ω·m
+                        - **Proportion du profil :** {row['percentage']:.1f}%
+                        """)
+                    
+                    with col_b:
+                        # Recommandation selon le type
+                        rho = row['rho_mean']
+                        if rho < 1:
+                            st.error("🚫 À ÉVITER - Eau salée")
+                        elif rho < 20:
+                            st.warning("⚠️ DIFFICILE - Argile imperméable")
+                        elif rho < 100:
+                            st.success("✅ CIBLE PRIORITAIRE - Aquifère")
+                        elif rho < 500:
+                            st.info("ℹ️ BON POTENTIEL - Formations perméables")
+                        else:
+                            st.warning("⚠️ ROCHES DURES - Forage difficile")
+        
+        # ========== COUPE 4 - PSEUDO-SECTION RÉELLE (FORMAT CLASSIQUE) ==========
             with st.expander("📊 Coupe 4 - Pseudo-Section de Résistivité Apparente (Format Classique)", expanded=True):
                 st.markdown("""
                 **Carte de pseudo-section au format géophysique standard**
@@ -10993,10 +10929,6 @@ Résolution: {n_x}×{n_y}×{n_z}
         st.info("📸 Veuillez uploader une image géophysique pour commencer l'analyse spectrale.")
 
 
-if __name__ == "__main__":
-    st.set_page_config(page_title="SETRAF - Analyse Géophysique", layout="wide")
-
-
 # --- Sidebar ---
 logo_path = os.path.join(os.path.dirname(__file__), "logo_belikan.png")
 if os.path.exists(logo_path):
@@ -11058,3 +10990,98 @@ st.sidebar.markdown("**SETRAF - Subaquifère ERT Analysis**  \n"
                     "- Détection de trajectoires par RANSAC  \n"
                     "- Visualisation 3D interactive des anomalies")
 
+# ===================== CHAT GLOBAL EN BAS DE PAGE =====================
+st.markdown("---")
+st.markdown("## 💬 Chat IA - Posez vos questions")
+
+if st.session_state.get('llm_loaded', False):
+    # Initialiser l'historique de chat
+    if 'chat_messages' not in st.session_state:
+        st.session_state.chat_messages = []
+    
+    # Afficher les messages
+    for message in st.session_state.chat_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # Zone de saisie (HORS des tabs)
+    user_question = st.chat_input("Posez une question sur la géophysique, ERT, vos données...")
+    
+    if user_question:
+        st.session_state.chat_messages.append({"role": "user", "content": user_question})
+        
+        # Contexte des données si disponibles
+        context = ""
+        if 'current_data_context' in st.session_state and st.session_state['current_data_context']:
+            ctx = st.session_state['current_data_context']
+            context = f"""Fichier: {ctx.get('filename', 'N/A')}
+Mesures: {ctx.get('n_measures', 'N/A')} sur {ctx.get('n_points', 'N/A')} points
+Résistivité: {ctx.get('resistivity_range', 'N/A')}
+Moyenne: {ctx.get('mean', 'N/A')}, Médiane: {ctx.get('median', 'N/A')}"""
+        
+        # Prompt court et direct
+        prompt = f"""[INST] Expert géophysique en tomographie électrique (ERT).
+{context}
+
+Question: {user_question}
+
+Réponds en français, concis (100-200 mots max). [/INST]"""
+        
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            
+            # Afficher indicateur pendant génération
+            message_placeholder.info("🧠 Génération en cours...")
+            
+            # Génération
+            try:
+                result = st.session_state.llm_pipeline(
+                    prompt,
+                    max_new_tokens=200,
+                    temperature=0.7,
+                    do_sample=True,
+                    return_full_text=False
+                )
+                
+                if result and len(result) > 0:
+                    full_response = result[0].get('generated_text', '')
+                    
+                    # Extraire après [/INST] si présent
+                    if '[/INST]' in full_response:
+                        full_response = full_response.split('[/INST]')[-1].strip()
+                    
+                    message_placeholder.markdown(full_response)
+                else:
+                    full_response = "Désolé, je n'ai pas pu générer de réponse."
+                    message_placeholder.markdown(full_response)
+                
+            except Exception as e:
+                full_response = f"❌ Erreur: {str(e)[:100]}"
+                message_placeholder.markdown(full_response)
+        
+        st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
+        st.rerun()
+    
+    # Boutons d'action
+    if st.session_state.chat_messages:
+        col_clear, col_export = st.columns([1, 1])
+        with col_clear:
+            if st.button("🗑️ Effacer la conversation"):
+                st.session_state.chat_messages = []
+                st.rerun()
+        
+        with col_export:
+            if st.button("💾 Exporter la conversation"):
+                conversation_text = ""
+                for msg in st.session_state.chat_messages:
+                    role = "**Vous**" if msg["role"] == "user" else "**Assistant IA**"
+                    conversation_text += f"{role}:\n{msg['content']}\n\n---\n\n"
+                
+                st.download_button(
+                    "📥 Télécharger la conversation",
+                    conversation_text,
+                    f"conversation_ia_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    "text/plain"
+                )
+else:
+    st.info("ℹ️ Le chat IA est disponible lorsque le modèle LLM est chargé.")

@@ -52,3 +52,8 @@ ipywidgets>=8.1.0
 # Utilitaires
 aiofiles>=23.2.0
 python-dateutil>=2.8.0
+
+# Deep Learning & Transformers (ajouté pour téléchargement automatique des modèles)
+torch>=2.0.0
+transformers>=4.30.0
+sentence-transformers>=2.2.0
