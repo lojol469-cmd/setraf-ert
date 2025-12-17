@@ -4095,19 +4095,27 @@ def load_setraf_logo():
 
             return buffer
         else:
-            st.warning("⚠️ Logo SETRAF non disponible (base64 vide ou manquant)")
+            # Return None without st. calls
+            return None
     except Exception as e:
-        st.error(f"❌ Erreur chargement logo SETRAF: {str(e)}")
-        st.info("💡 Le logo par défaut sera utilisé")
-
-    return None
-
-# Charger le logo une seule fois
-if 'setraf_logo_buffer' not in st.session_state:
-    st.session_state.setraf_logo_buffer = load_setraf_logo()
+        # Return None without st. calls
+        return None
 
 # --- Interface Streamlit ---
 st.set_page_config(
+    page_title="SETRAF - Subaquifère ERT Analysis", 
+    page_icon="💧",
+    layout="wide", 
+    initial_sidebar_state="expanded"
+)
+
+# Charger le logo une seule fois après set_page_config
+if 'setraf_logo_buffer' not in st.session_state:
+    logo_buffer = load_setraf_logo()
+    if logo_buffer is None:
+        st.warning("⚠️ Logo SETRAF non disponible (base64 vide ou manquant)")
+        st.info("💡 Le logo par défaut sera utilisé")
+    st.session_state.setraf_logo_buffer = logo_buffer
     page_title="SETRAF - Subaquifère ERT Analysis", 
     page_icon="💧",
     layout="wide", 
