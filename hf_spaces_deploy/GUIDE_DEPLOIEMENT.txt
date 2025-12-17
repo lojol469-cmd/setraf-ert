@@ -1,0 +1,134 @@
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║   🤗 GUIDE DÉPLOIEMENT HUGGING FACE SPACES - SETRAF           ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 RÉPONSE: FICHIERS (PAS L'IMAGE DOCKER)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Pour Hugging Face Spaces, vous uploadez les FICHIERS SOURCE:
+  ✅ ERTest.py
+  ✅ requirements.txt  
+  ✅ README.md
+  ✅ logo_belikan.png
+
+❌ PAS l'image Docker (HF construit automatiquement)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 ÉTAPES DE DÉPLOIEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Étape 1: CRÉER LE SPACE
+------------------------
+1. Aller sur: https://huggingface.co/new-space
+2. Remplir le formulaire:
+   • Owner: BelikanM
+   • Space name: ERT-SETRAF
+   • License: MIT
+   • SDK: Streamlit
+   • Visibility: Public
+   • Hardware: CPU basic (gratuit) ou CPU upgrade (payant, plus rapide)
+3. Cliquer "Create Space"
+
+Étape 2: UPLOADER LES FICHIERS
+-------------------------------
+Méthode A - Interface Web (plus simple):
+  1. Sur la page du Space, cliquer "Files"
+  2. Cliquer "Add file" → "Upload files"
+  3. Drag & drop les fichiers de: ./hf_spaces_deploy/
+     • ERTest.py (569 KB)
+     • requirements.txt (1 KB)
+     • README.md (1 KB)
+     • logo_belikan.png (472 KB)
+     • .gitignore (58 B)
+  4. Commit message: "Initial commit - SETRAF ERT Analysis"
+  5. Cliquer "Commit to main"
+
+Méthode B - Git (si vous préférez):
+  git clone https://huggingface.co/spaces/BelikanM/ERT-SETRAF
+  cd ERT-SETRAF
+  cp ../hf_spaces_deploy/* .
+  git add .
+  git commit -m "Initial commit - SETRAF ERT Analysis"
+  git push
+
+Étape 3: CONFIGURER LES SECRETS
+--------------------------------
+1. Aller dans: Settings → Repository secrets
+2. Cliquer "New secret"
+
+Secret 1 - Token HuggingFace:
+  • Name: HF_TOKEN
+  • Value: [YOUR_HF_TOKEN]
+  • Cliquer "Add secret"
+
+Secret 2 - API Tavily (optionnel):
+  • Name: TAVILY_API_KEY
+  • Value: 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
+  • Cliquer "Add secret"
+
+⚠️  IMPORTANT: Si le token HF ne fonctionne pas:
+   - Créer un nouveau token sur: https://huggingface.co/settings/tokens
+   - Type: "Write"
+   - Name: "SETRAF-Access"
+   - Copier et utiliser ce nouveau token
+
+Étape 4: ATTENDRE LE BUILD
+---------------------------
+1. Retourner sur l'onglet "App"
+2. Le build démarre automatiquement
+3. Suivre les logs en temps réel
+4. Durée: 5-10 minutes pour installer les dépendances
+
+Étape 5: PREMIER DÉMARRAGE
+---------------------------
+⏱️  Lors du premier démarrage, l'app va télécharger les modèles IA:
+  • SentenceTransformer (88 MB) - ~1 min
+  • CLIP (600 MB) - ~3 min
+  • Mistral (14 GB) - Optionnel, désactivé par défaut
+
+Total premier démarrage: ~5-10 minutes
+Redémarrages suivants: <30 secondes (cache persistant)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ VÉRIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Si tout fonctionne:
+  ✅ Les logs de build montrent "Running on 0.0.0.0:7860"
+  ✅ L'interface Streamlit s'affiche
+  ✅ Pas d'erreurs dans les logs
+
+Si erreurs:
+  ❌ ModuleNotFoundError → Vérifier requirements.txt
+  ❌ Secrets non trouvés → Vérifier les noms des secrets
+  ❌ Out of memory → Upgrader vers CPU upgrade ou GPU
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 LIENS UTILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Space créé: https://huggingface.co/spaces/BelikanM/ERT-SETRAF
+Documentation HF: https://huggingface.co/docs/hub/spaces
+Streamlit Docs: https://docs.streamlit.io/
+
+Contact: nyundumathryme@gmail.com
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📁 FICHIERS PRÉPARÉS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Emplacement: ./hf_spaces_deploy/
+
+Contenu:
+  • ERTest.py (569 KB) - Application principale
+  • requirements.txt (1 KB) - Dépendances Python
+  • README.md (1 KB) - Documentation du Space
+  • logo_belikan.png (472 KB) - Logo
+  • .gitignore (58 B) - Fichiers à ignorer
+
+Taille totale: ~1 MB
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

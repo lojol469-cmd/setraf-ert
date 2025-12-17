@@ -1,0 +1,118 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║          🚀 SETRAF - GUIDE DE DÉMARRAGE RAPIDE                  ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 RÉSUMÉ DU BUILD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Image Docker: belikanm/setraf:v2.0.0
+✅ Taille: 6.4 GB (dépendances + frameworks)
+✅ Build: Terminé avec succès
+⏳ Push Docker Hub: En cours...
+
+🔗 Docker Hub: https://hub.docker.com/r/belikanm/setraf
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 MODÈLES IA - TÉLÉCHARGEMENT AUTOMATIQUE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Les modèles IA NE SONT PAS dans l'image Docker.
+Ils seront téléchargés AUTOMATIQUEMENT au premier démarrage.
+
+Source: HuggingFace Hub (https://huggingface.co)
+
+Modèles téléchargés:
+  📦 SentenceTransformer    88 MB      ~1 min
+  📦 CLIP                   600 MB     ~3 min
+  📦 Mistral-7B (opt)       14 GB      ~15 min
+
+Après le premier démarrage, les modèles sont EN CACHE.
+Redémarrages suivants: <30 secondes ⚡
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🐳 DÉMARRAGE DOCKER COMPOSE (Local/Test)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+cd /home/belikan/KIbalione8/SETRAF
+
+# 1. Démarrer
+docker-compose -f docker-compose.production.yml up -d
+
+# 2. Suivre les logs (téléchargement des modèles)
+docker logs -f setraf-production
+
+# 3. Ouvrir l'application
+#    http://localhost:8504
+
+# 4. Arrêter
+docker-compose -f docker-compose.production.yml down
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+☸️  DÉMARRAGE KUBERNETES (Production)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+cd /home/belikan/KIbalione8/SETRAF/kubernetes
+
+# 1. Configurer les secrets
+nano configmap.yaml
+# Remplacer HF_TOKEN et TAVILY_API_KEY (en base64)
+
+# 2. Déployer
+./deploy-k8s.sh apply
+
+# 3. Vérifier l'état
+kubectl get all -n setraf
+
+# 4. Suivre les logs
+kubectl logs -n setraf -l app=setraf -f
+
+# 5. Obtenir l'URL
+kubectl get svc -n setraf
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚙️  VARIABLES D'ENVIRONNEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Variable              | Requis | Défaut | Description
+─────────────────────────────────────────────────────────────────
+HF_TOKEN              | ❌ Non | -      | Token HuggingFace
+TAVILY_API_KEY        | ⚪ Opt | -      | API Tavily
+DOWNLOAD_MISTRAL      | ⚪ Opt | false  | Télécharger Mistral (14GB)
+TRANSFORMERS_CACHE    | ⚪ Opt | /root/.cache/huggingface
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 MONITORING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# État du push Docker Hub
+docker push belikanm/setraf:latest  # Après v2.0.0
+
+# Logs Docker
+docker logs -f setraf-production
+
+# Logs Kubernetes
+kubectl logs -n setraf -l app=setraf -f
+
+# Vérifier le cache des modèles
+docker exec setraf-production du -sh /root/.cache/huggingface
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 DOCUMENTATION COMPLÈTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Guides détaillés disponibles:
+  📄 DEPLOYMENT.md        → Guide complet de déploiement
+  📄 RESUME_FINAL.md      → Analyse et recommandations
+  📄 kubernetes/          → Configurations Kubernetes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🆘 SUPPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Email: nyundumathryme@gmail.com
+Docker Hub: https://hub.docker.com/r/belikanm/setraf
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,0 +1,57 @@
+# =====================================================
+# SETRAF - Kubernetes ConfigMap
+# Configuration de l'application
+# =====================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: setraf-config
+  namespace: setraf
+  labels:
+    app: setraf
+data:
+  # Configuration Streamlit
+  STREAMLIT_SERVER_PORT: "8504"
+  STREAMLIT_SERVER_ADDRESS: "0.0.0.0"
+  STREAMLIT_SERVER_HEADLESS: "true"
+  
+  # Configuration HuggingFace
+  HF_HOME: "/root/.cache/huggingface"
+  TRANSFORMERS_CACHE: "/root/.cache/huggingface"
+  HF_DATASETS_CACHE: "/root/.cache/huggingface"
+  
+  # Configuration TensorFlow/PyTorch
+  CUDA_VISIBLE_DEVICES: "-1"
+  TF_CPP_MIN_LOG_LEVEL: "2"
+  PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:512"
+  
+  # Contrôle du téléchargement
+  DOWNLOAD_MISTRAL: "false"  # true pour télécharger Mistral au démarrage
+  
+  # Configuration application
+  PYTHONUNBUFFERED: "1"
+  TZ: "Africa/Libreville"
+
+---
+# =====================================================
+# SETRAF - Kubernetes Secret
+# Secrets sensibles (API Keys, tokens)
+# ATTENTION: Encoder les valeurs en base64 avant utilisation
+# echo -n "votre-token" | base64
+# =====================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: setraf-secrets
+  namespace: setraf
+  labels:
+    app: setraf
+type: Opaque
+data:
+  # HuggingFace Token (base64)
+  # Remplacer par: echo -n "hf_YOUR_TOKEN" | base64
+  HF_TOKEN: aGZfQ01LeWd2a0xkY0ZablNyQ2N6WnhPR0tYd0tqZU1G
+  
+  # Tavily API Key (base64)
+  # Remplacer par: echo -n "tvly-YOUR-KEY" | base64
+  TAVILY_API_KEY: dHZseS1kZXYtcUttTW9PcEJOSGhOS1hKaTI3dnJnUm1VRXI2aDFCcDM=

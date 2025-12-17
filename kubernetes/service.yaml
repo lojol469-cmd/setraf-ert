@@ -1,0 +1,66 @@
+# =====================================================
+# SETRAF - Kubernetes Service
+# Expose l'application SETRAF
+# =====================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: setraf-service
+  namespace: setraf
+  labels:
+    app: setraf
+spec:
+  type: LoadBalancer  # Utiliser NodePort pour bare-metal ou ClusterIP avec Ingress
+  selector:
+    app: setraf
+  ports:
+    - name: streamlit
+      protocol: TCP
+      port: 8504
+      targetPort: 8504
+      # nodePort: 30504  # Décommenter pour NodePort
+    - name: api
+      protocol: TCP
+      port: 8505
+      targetPort: 8505
+      # nodePort: 30505  # Décommenter pour NodePort
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+
+---
+# =====================================================
+# SETRAF - Kubernetes Ingress (Optionnel)
+# Pour exposer via un nom de domaine
+# =====================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: setraf-ingress
+  namespace: setraf
+  labels:
+    app: setraf
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"  # Si vous utilisez cert-manager
+spec:
+  ingressClassName: nginx  # Adapter selon votre Ingress Controller
+  rules:
+    - host: setraf.votredomaine.com  # Remplacer par votre domaine
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: setraf-service
+                port:
+                  number: 8504
+  # TLS/SSL (optionnel)
+  tls:
+    - hosts:
+        - setraf.votredomaine.com
+      secretName: setraf-tls-cert

@@ -1,0 +1,66 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: setraf-ingress
+  namespace: setraf
+  labels:
+    app: setraf
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/websocket-services: "setraf-frontend-service"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+spec:
+  tls:
+  - hosts:
+    - setraf.infomaniak.ch
+    - ert.infomaniak.ch
+    secretName: setraf-tls-cert
+  rules:
+  # Route principale - Frontend Streamlit
+  - host: setraf.infomaniak.ch
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: setraf-frontend-service
+            port:
+              number: 8504
+      # Backend Auth API
+      - path: /api/auth
+        pathType: Prefix
+        backend:
+          service:
+            name: setraf-backend-service
+            port:
+              number: 5000
+      # FastAPI
+      - path: /api/ert
+        pathType: Prefix
+        backend:
+          service:
+            name: setraf-api-service
+            port:
+              number: 8505
+  
+  # Route alternative pour ERT
+  - host: ert.infomaniak.ch
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: setraf-frontend-service
+            port:
+              number: 8504

@@ -1,0 +1,11 @@
+# =====================================================
+# SETRAF - Kubernetes Namespace
+# =====================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: setraf
+  labels:
+    name: setraf
+    app: geophysics
+    environment: production

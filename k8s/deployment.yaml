@@ -1,0 +1,316 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: setraf-app
+  namespace: setraf
+  labels:
+    app: setraf
+    component: frontend
+    version: v1.0.0
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: setraf
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: setraf
+        component: frontend
+        version: v1.0.0
+    spec:
+      containers:
+      - name: setraf-frontend
+        image: belikanm/kibaertanalyste:1.0.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8504
+          name: streamlit
+          protocol: TCP
+        env:
+        - name: STREAMLIT_SERVER_PORT
+          value: "8504"
+        - name: STREAMLIT_SERVER_ADDRESS
+          value: "0.0.0.0"
+        - name: STREAMLIT_SERVER_HEADLESS
+          value: "true"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: setraf-config
+              key: auth_port
+        - name: AUTH_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: setraf-config
+              key: auth_port
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: mongo-uri
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: jwt-secret
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8504
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8504
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: data
+          mountPath: /app/data
+        - name: uploads
+          mountPath: /app/uploads
+        - name: exports
+          mountPath: /app/exports
+      volumes:
+      - name: logs
+        persistentVolumeClaim:
+          claimName: setraf-logs-pvc
+      - name: data
+        persistentVolumeClaim:
+          claimName: setraf-data-pvc
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: setraf-uploads-pvc
+      - name: exports
+        persistentVolumeClaim:
+          claimName: setraf-exports-pvc
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: setraf-auth
+  namespace: setraf
+  labels:
+    app: setraf
+    component: backend
+    version: v1.0.0
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: setraf
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: setraf
+        component: backend
+        version: v1.0.0
+    spec:
+      containers:
+      - name: setraf-backend
+        image: belikanm/setraf-auth:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+          name: api
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: AUTH_PORT
+          value: "5000"
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: mongo-uri
+        - name: MONGO_USER
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: mongo-user
+        - name: MONGO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: mongo-password
+        - name: MONGO_CLUSTER
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: mongo-cluster
+        - name: MONGO_DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: mongo-db-name
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: jwt-secret
+        - name: JWT_REFRESH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: jwt-refresh-secret
+        - name: EMAIL_USER
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: email-user
+        - name: EMAIL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: email-pass
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 5000
+          initialDelaySeconds: 40
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 5000
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: auth-logs
+          mountPath: /app/logs
+        - name: auth-public
+          mountPath: /app/public
+      volumes:
+      - name: auth-logs
+        persistentVolumeClaim:
+          claimName: setraf-auth-logs-pvc
+      - name: auth-public
+        persistentVolumeClaim:
+          claimName: setraf-auth-public-pvc
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: setraf-api
+  namespace: setraf
+  labels:
+    app: setraf
+    component: api
+    version: v1.0.0
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: setraf
+      component: api
+  template:
+    metadata:
+      labels:
+        app: setraf
+        component: api
+        version: v1.0.0
+    spec:
+      containers:
+      - name: setraf-api
+        image: belikanm/kibaertanalyste:1.0.0
+        imagePullPolicy: Always
+        command: ["uvicorn", "api_setraf:app", "--host", "0.0.0.0", "--port", "8505"]
+        ports:
+        - containerPort: 8505
+          name: fastapi
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "5000"
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: setraf-secrets
+              key: mongo-uri
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: 8505
+          initialDelaySeconds: 40
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: 8505
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: api-logs
+          mountPath: /app/logs
+        - name: api-data
+          mountPath: /app/data
+      volumes:
+      - name: api-logs
+        persistentVolumeClaim:
+          claimName: setraf-api-logs-pvc
+      - name: api-data
+        persistentVolumeClaim:
+          claimName: setraf-data-pvc
+      restartPolicy: Always
