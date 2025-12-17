@@ -4116,32 +4116,6 @@ if 'setraf_logo_buffer' not in st.session_state:
         st.warning("⚠️ Logo SETRAF non disponible (base64 vide ou manquant)")
         st.info("💡 Le logo par défaut sera utilisé")
     st.session_state.setraf_logo_buffer = logo_buffer
-    page_title="SETRAF - Subaquifère ERT Analysis", 
-    page_icon="💧",
-    layout="wide", 
-    initial_sidebar_state="expanded"
-)
-
-# ========== SYSTÈME D'AUTHENTIFICATION ==========
-# if AUTH_ENABLED:
-#     auth_manager = AuthManager()
-#     
-#     # Vérifier l'authentification
-#     if not auth_manager.is_authenticated():
-#         # Afficher l'interface de connexion
-#         st.markdown("""
-#         <div style="text-align: center; padding: 20px;">
-#             <h1>💧 SETRAF - Subaquifère ERT Analysis Tool</h1>
-#             <p style="font-size: 18px; color: #666;">
-#                 Plateforme d'analyse géophysique avancée
-#             </p>
-#         </div>
-#         """, unsafe_allow_html=True)
-#         show_auth_ui()
-#         st.stop()
-#     
-#     # Afficher les informations utilisateur dans la sidebar
-#     show_user_info()
 
 st.title("💧 SETRAF - Subaquifère ERT Analysis Tool (08 Novembre 2025)")
 
