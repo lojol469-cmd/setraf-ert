@@ -4747,6 +4747,32 @@ if st.session_state.get('llm_loaded', False):
 st.markdown("---")
 st.markdown("---")
 
+# CSS pour rendre la barre d'onglets horizontalement scrollable
+st.markdown("""
+<style>
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    white-space: nowrap !important;
+    scrollbar-width: thin;
+    scrollbar-color: #888 #f1f1f1;
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar {
+    height: 8px;
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Créer les onglets principaux
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🌡️ Calculateur Réglage Température",
