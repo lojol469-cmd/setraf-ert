@@ -4733,11 +4733,13 @@ st.markdown("---")
 st.markdown("""
 <style>
 [data-testid="stTabs"] [data-baseweb="tab-list"] {
-    overflow-x: auto !important;
+    overflow-x: scroll !important;
     overflow-y: hidden !important;
     white-space: nowrap !important;
     scrollbar-width: thin;
     scrollbar-color: #888 #f1f1f1;
+    display: flex !important;
+    flex-wrap: nowrap !important;
 }
 [data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar {
     height: 8px;
@@ -4750,6 +4752,29 @@ st.markdown("""
     border-radius: 4px;
 }
 [data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+/* Alternative selectors */
+.stTabs [data-baseweb="tab-list"] {
+    overflow-x: scroll !important;
+    overflow-y: hidden !important;
+    white-space: nowrap !important;
+    scrollbar-width: thin;
+    scrollbar-color: #888 #f1f1f1;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+    height: 8px;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover {
     background: #555;
 }
 </style>
