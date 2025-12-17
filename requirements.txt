@@ -45,6 +45,7 @@ opencv-python-headless>=4.8.0
 
 # Machine Learning avancé
 tensorflow>=2.15.0
+keras==2.15.0
 
 # Widgets interactifs (pour interface avancée)
 ipywidgets>=8.1.0
@@ -55,5 +56,16 @@ python-dateutil>=2.8.0
 
 # Deep Learning & Transformers (ajouté pour téléchargement automatique des modèles)
 torch>=2.0.0
-transformers>=4.30.0
+transformers>=4.36.0,<4.41.0
 sentence-transformers>=2.2.0
+accelerate>=0.25.0
+
+# Base vectorielle FAISS
+faiss-cpu>=1.7.0
+
+# LangChain pour l'intégration LLM
+langchain>=0.1.0
+langchain-text-splitters>=0.0.1
+
+# Traitement PDF
+pypdf>=4.0.0

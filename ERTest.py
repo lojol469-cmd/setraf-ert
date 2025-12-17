@@ -176,7 +176,7 @@ class ERTKnowledgeBase:
             import faiss
             import pickle
             import os
-            from langchain.text_splitter import RecursiveCharacterTextSplitter
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
 
             # DOCUMENTS OPTIMISÉS - Plus courts et plus ciblés
             default_docs = [
@@ -1703,7 +1703,7 @@ RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""",
    - Continuité latérale des couches
 
 2️⃣ STRUCTURE GÉOLOGIQUE 3D (8-10 lignes)
-   - Description de la coupe géologique verticale
+   - Description de la coupe géologique verticale (VOIR LES COUPES GÉOLOGIQUES GÉNÉRÉES)
    - Pendage et orientation des couches
    - Détection de discontinuités (failles, fractures, karsts)
    - Zones de contact entre formations
@@ -2127,10 +2127,10 @@ def load_mistral_llm(use_cpu=True, quantize=True):
             # Phi-3-mini est un modèle léger (3.8B) parfait pour HF Spaces
             model = AutoModelForCausalLM.from_pretrained(
                 MISTRAL_MODEL_PATH,
-                torch_dtype=dtype,
+                torch_dtype=torch.float32,  # Forcer float32 pour CPU
                 trust_remote_code=True,
-                low_cpu_mem_usage=True,
-                device_map="auto"
+                low_cpu_mem_usage=True
+                # Pas de device_map pour CPU
             )
         except Exception as e:
             st.warning(f"⚠️ Chargement optimisé échoué, mode standard : {str(e)[:100]}")
@@ -2478,14 +2478,14 @@ DONNÉES RÉELLES MESURÉES:
 - Résistivité: min={rho_min:.2f}, max={rho_max:.2f}, moy={rho_mean:.2f}, méd={rho_median:.2f}, σ={rho_std:.2f} Ω·m
 - Profondeur: {depth_min:.1f} à {depth_max:.1f}m (moy={depth_mean:.1f}m)
 
-Fournis 2 parties COURTES EN FRANÇAIS:
-1. LÉGENDE (4 lignes max): Échelle de couleurs avec VRAIES plages observées
-2. INTERPRÉTATION (4 phrases): Que révèlent CES données spécifiques?
+Fournis 2 parties STRUCTURÉES EN FRANÇAIS:
+1. LÉGENDE (5-6 lignes): Échelle de couleurs avec VRAIES plages observées et leur signification géologique
+2. INTERPRÉTATION (5-7 phrases complètes): Analyse géologique détaillée basée sur CES données spécifiques
 
-RÉPONDS UNIQUEMENT EN FRANÇAIS. Concis et basé uniquement sur les statistiques fournies. [/INST]"""
+IMPORTANT: Termine toujours tes phrases complètement. RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
         
-        # Génération avec le LLM
-        result = llm_pipeline(prompt, max_new_tokens=200, do_sample=True, temperature=0.7)
+        # Génération avec le LLM - augmentation de max_new_tokens pour réponses complètes
+        result = llm_pipeline(prompt, max_new_tokens=600, do_sample=True, temperature=0.7, top_p=0.9)
         generated = result[0]['generated_text']
         
         # Parser la réponse
@@ -2944,14 +2944,14 @@ DONNÉES RÉELLES MESURÉES:
 - Résistivité: min={rho_min:.2f}, max={rho_max:.2f}, moy={rho_mean:.2f}, méd={rho_median:.2f}, σ={rho_std:.2f} Ω·m
 - Profondeur: {depth_min:.1f} à {depth_max:.1f}m (moy={depth_mean:.1f}m)
 
-Fournis 2 parties COURTES EN FRANÇAIS:
-1. LÉGENDE (4 lignes max): Échelle de couleurs avec VRAIES plages observées
-2. INTERPRÉTATION (4 phrases): Que révèlent CES données spécifiques?
+Fournis 2 parties STRUCTURÉES EN FRANÇAIS:
+1. LÉGENDE (5-6 lignes): Échelle de couleurs avec VRAIES plages observées et leur signification géologique
+2. INTERPRÉTATION (5-7 phrases complètes): Analyse géologique détaillée basée sur CES données spécifiques
 
-RÉPONDS UNIQUEMENT EN FRANÇAIS. Concis et basé uniquement sur les statistiques fournies. [/INST]"""
+IMPORTANT: Termine toujours tes phrases complètement. RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
         
-        # Génération avec le LLM
-        result = llm_pipeline(prompt, max_new_tokens=200, do_sample=True, temperature=0.7)
+        # Génération avec le LLM - augmentation de max_new_tokens pour réponses complètes
+        result = llm_pipeline(prompt, max_new_tokens=600, do_sample=True, temperature=0.7, top_p=0.9)
         generated = result[0]['generated_text']
         
         # Parser la réponse
@@ -3617,7 +3617,22 @@ def create_pdf_report(df, unit, figures_dict):
         # Ajouter toutes les figures fournies
         for fig_name, fig in figures_dict.items():
             if fig is not None:
-                pdf.savefig(fig, bbox_inches='tight')
+                try:
+                    # Vérifier si la figure est encore valide
+                    if not plt.fignum_exists(fig.number):
+                        continue  # Figure fermée, passer à la suivante
+
+                    pdf.savefig(fig, bbox_inches='tight')
+                except Exception as e:
+                    # Créer une page d'erreur pour cette figure
+                    fig_err = plt.figure(figsize=(8.5, 11))
+                    fig_err.text(0.5, 0.6, f'ERREUR Figure: {fig_name}',
+                                ha='center', va='center', fontsize=16, color='red', fontweight='bold')
+                    fig_err.text(0.5, 0.5, f'Figure corrompue: {str(e)}',
+                                ha='center', va='center', fontsize=12)
+                    plt.axis('off')
+                    pdf.savefig(fig_err, bbox_inches='tight')
+                    plt.close(fig_err)
         
         # Ajouter les images générées par IA si disponibles
         if 'generated_spectral_image' in st.session_state:
@@ -4042,6 +4057,55 @@ geology_html = """
 # --- Seed pour reproductibilité des exemples ---
 np.random.seed(42)
 
+# --- Logo SETRAF en base64 (intégré) ---
+SETRAF_LOGO_BASE64 = None
+try:
+    # Charger le logo depuis le fichier logo_base64_code.py
+    from logo_base64_code import SETRAF_LOGO_BASE64
+except ImportError:
+    try:
+        # Fallback: charger depuis logo_embed_complete.py
+        with open('logo_embed_complete.py', 'r') as f:
+            exec(f.read())
+    except:
+        pass
+
+# --- Charger le logo SETRAF au démarrage ---
+@st.cache_data
+def load_setraf_logo():
+    """Charge le logo SETRAF depuis base64"""
+    try:
+        if SETRAF_LOGO_BASE64 is not None and len(SETRAF_LOGO_BASE64) > 100:
+            import base64
+            from io import BytesIO
+            from PIL import Image
+
+            # Décoder le base64
+            logo_bytes = base64.b64decode(SETRAF_LOGO_BASE64)
+
+            # Créer un buffer
+            buffer = BytesIO(logo_bytes)
+
+            # Vérifier que c'est bien une image valide
+            img = Image.open(buffer)
+            img.verify()  # Vérifier l'intégrité
+
+            # Remettre le buffer au début
+            buffer.seek(0)
+
+            return buffer
+        else:
+            st.warning("⚠️ Logo SETRAF non disponible (base64 vide ou manquant)")
+    except Exception as e:
+        st.error(f"❌ Erreur chargement logo SETRAF: {str(e)}")
+        st.info("💡 Le logo par défaut sera utilisé")
+
+    return None
+
+# Charger le logo une seule fois
+if 'setraf_logo_buffer' not in st.session_state:
+    st.session_state.setraf_logo_buffer = load_setraf_logo()
+
 # --- Interface Streamlit ---
 st.set_page_config(
     page_title="SETRAF - Subaquifère ERT Analysis", 
@@ -4073,10 +4137,289 @@ st.set_page_config(
 
 st.title("💧 SETRAF - Subaquifère ERT Analysis Tool (08 Novembre 2025)")
 
-# ========== CHARGEMENT AUTOMATIQUE DU LLM AU DÉMARRAGE ==========
-st.sidebar.markdown("---")
-st.sidebar.subheader("🤖 Intelligence Artificielle")
+# LOGO DE L'APPLICATION
+if st.session_state.setraf_logo_buffer is not None:
+    try:
+        st.sidebar.image(st.session_state.setraf_logo_buffer, width=200, caption="SETRAF - Analyse Géophysique ERT")
+    except Exception as e:
+        st.sidebar.error(f"❌ Erreur affichage logo: {str(e)}")
+        st.sidebar.markdown("### 💧 SETRAF")
+        st.sidebar.markdown("*Subaquifère ERT Analysis Tool*")
+else:
+    # Logo de fallback avec style amélioré
+    st.sidebar.markdown("""
+    <div style="text-align: center; padding: 10px; background: linear-gradient(135deg, #1e3a8a, #3b82f6); border-radius: 10px; color: white; margin-bottom: 10px;">
+        <h2 style="margin: 0; font-size: 24px;">💧 SETRAF</h2>
+        <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.9;">Subaquifère ERT Analysis Tool</p>
+    </div>
+    """, unsafe_allow_html=True)
 
+st.sidebar.markdown("---")
+
+# ========== PALETTES DE COULEURS ET THÈMES ==========
+st.sidebar.markdown("### 🎨 Thème de l'Application")
+
+# Définition des palettes de couleurs prédéfinies
+THEME_PALETTES = {
+    "🌊 Océan (Défaut)": {
+        "primary": "#1e3a8a",      # Bleu foncé
+        "secondary": "#3b82f6",    # Bleu moyen
+        "accent": "#06b6d4",       # Cyan
+        "background": "#f0f9ff",   # Bleu très clair
+        "surface": "#ffffff",      # Blanc
+        "text": "#1e293b",         # Gris foncé
+        "text_secondary": "#64748b", # Gris moyen
+        "success": "#10b981",      # Vert
+        "warning": "#f59e0b",      # Orange
+        "error": "#ef4444",        # Rouge
+        "border": "#e2e8f0"        # Gris clair
+    },
+    "🌿 Nature": {
+        "primary": "#166534",      # Vert foncé
+        "secondary": "#22c55e",    # Vert moyen
+        "accent": "#84cc16",       # Vert clair
+        "background": "#f0fdf4",   # Vert très clair
+        "surface": "#ffffff",      # Blanc
+        "text": "#14532d",         # Vert très foncé
+        "text_secondary": "#4b5563", # Gris
+        "success": "#10b981",      # Vert
+        "warning": "#f59e0b",      # Orange
+        "error": "#ef4444",        # Rouge
+        "border": "#d1fae5"        # Vert pâle
+    },
+    "🌙 Nuit": {
+        "primary": "#1e1b4b",      # Indigo foncé
+        "secondary": "#6366f1",    # Indigo
+        "accent": "#a78bfa",       # Violet
+        "background": "#0f0a19",   # Noir bleuté
+        "surface": "#1e1b4b",      # Indigo foncé
+        "text": "#f8fafc",         # Blanc
+        "text_secondary": "#cbd5e1", # Gris clair
+        "success": "#10b981",      # Vert
+        "warning": "#f59e0b",      # Orange
+        "error": "#ef4444",        # Rouge
+        "border": "#334155"        # Gris foncé
+    },
+    "🌅 Aube": {
+        "primary": "#7c2d12",      # Orange foncé
+        "secondary": "#ea580c",    # Orange
+        "accent": "#f97316",       # Orange clair
+        "background": "#fff7ed",   # Orange très clair
+        "surface": "#ffffff",      # Blanc
+        "text": "#9a3412",         # Orange très foncé
+        "text_secondary": "#64748b", # Gris
+        "success": "#10b981",      # Vert
+        "warning": "#f59e0b",      # Orange
+        "error": "#ef4444",        # Rouge
+        "border": "#fed7aa"        # Orange pâle
+    },
+    "⚫ Classique": {
+        "primary": "#374151",      # Gris foncé
+        "secondary": "#6b7280",    # Gris moyen
+        "accent": "#9ca3af",       # Gris clair
+        "background": "#f9fafb",   # Gris très clair
+        "surface": "#ffffff",      # Blanc
+        "text": "#111827",         # Noir
+        "text_secondary": "#6b7280", # Gris
+        "success": "#10b981",      # Vert
+        "warning": "#f59e0b",      # Orange
+        "error": "#ef4444",        # Rouge
+        "border": "#e5e7eb"        # Gris pâle
+    },
+    "🌈 Arc-en-ciel": {
+        "primary": "#7c3aed",      # Violet
+        "secondary": "#ec4899",    # Rose
+        "accent": "#06b6d4",       # Cyan
+        "background": "#fef7ff",   # Violet très clair
+        "surface": "#ffffff",      # Blanc
+        "text": "#581c87",         # Violet foncé
+        "text_secondary": "#64748b", # Gris
+        "success": "#10b981",      # Vert
+        "warning": "#f59e0b",      # Orange
+        "error": "#ef4444",        # Rouge
+        "border": "#e9d5ff"        # Violet pâle
+    }
+}
+
+# Initialiser le thème dans session_state
+if 'selected_theme' not in st.session_state:
+    st.session_state.selected_theme = "🌊 Océan (Défaut)"
+
+# Sélecteur de thème
+selected_theme = st.sidebar.selectbox(
+    "🎨 Choisir un thème",
+    options=list(THEME_PALETTES.keys()),
+    index=list(THEME_PALETTES.keys()).index(st.session_state.selected_theme),
+    help="Changez l'apparence de l'application"
+)
+
+# Mettre à jour le thème sélectionné
+if selected_theme != st.session_state.selected_theme:
+    st.session_state.selected_theme = selected_theme
+    st.rerun()  # Redémarrer pour appliquer le thème
+
+# Récupérer les couleurs du thème sélectionné
+current_theme = THEME_PALETTES[st.session_state.selected_theme]
+
+# Appliquer le CSS personnalisé pour le thème
+theme_css = f"""
+<style>
+    /* Variables CSS pour le thème */
+    :root {{
+        --primary-color: {current_theme['primary']};
+        --secondary-color: {current_theme['secondary']};
+        --accent-color: {current_theme['accent']};
+        --background-color: {current_theme['background']};
+        --surface-color: {current_theme['surface']};
+        --text-color: {current_theme['text']};
+        --text-secondary-color: {current_theme['text_secondary']};
+        --success-color: {current_theme['success']};
+        --warning-color: {current_theme['warning']};
+        --error-color: {current_theme['error']};
+        --border-color: {current_theme['border']};
+    }}
+
+    /* Appliquer les couleurs de fond */
+    .stApp {{
+        background-color: var(--background-color);
+    }}
+
+    /* Sidebar */
+    .css-1d391kg, .css-12oz5g7 {{
+        background-color: var(--surface-color) !important;
+    }}
+
+    /* Texte principal */
+    .css-10trblm, .css-1v0mbdj {{
+        color: var(--text-color) !important;
+    }}
+
+    /* Titres */
+    h1, h2, h3, h4, h5, h6 {{
+        color: var(--primary-color) !important;
+    }}
+
+    /* Boutons principaux */
+    .stButton > button {{
+        background-color: var(--primary-color) !important;
+        color: white !important;
+        border: 1px solid var(--primary-color) !important;
+    }}
+
+    .stButton > button:hover {{
+        background-color: var(--secondary-color) !important;
+        border-color: var(--secondary-color) !important;
+    }}
+
+    /* Boutons secondaires */
+    .stButton > button[data-testid="secondary-button"] {{
+        background-color: transparent !important;
+        color: var(--primary-color) !important;
+        border: 1px solid var(--primary-color) !important;
+    }}
+
+    /* Cases à cocher */
+    .stCheckbox > div > div > div {{
+        background-color: var(--surface-color) !important;
+    }}
+
+    /* Sélecteurs */
+    .stSelectbox > div > div {{
+        background-color: var(--surface-color) !important;
+        border-color: var(--border-color) !important;
+    }}
+
+    /* Zones de texte */
+    .stTextArea > div > div {{
+        background-color: var(--surface-color) !important;
+        border-color: var(--border-color) !important;
+    }}
+
+    /* Messages de succès */
+    .stSuccess {{
+        background-color: rgba(16, 185, 129, 0.1) !important;
+        border-left-color: var(--success-color) !important;
+    }}
+
+    /* Messages d'avertissement */
+    .stWarning {{
+        background-color: rgba(245, 158, 11, 0.1) !important;
+        border-left-color: var(--warning-color) !important;
+    }}
+
+    /* Messages d'erreur */
+    .stError {{
+        background-color: rgba(239, 68, 68, 0.1) !important;
+        border-left-color: var(--error-color) !important;
+    }}
+
+    /* Info messages */
+    .stInfo {{
+        background-color: rgba(59, 130, 246, 0.1) !important;
+        border-left-color: var(--primary-color) !important;
+    }}
+
+    /* Cartes et conteneurs */
+    .css-1r6slb0, .css-1cpxqw2 {{
+        background-color: var(--surface-color) !important;
+        border: 1px solid var(--border-color) !important;
+    }}
+
+    /* Onglets */
+    .stTabs [data-baseweb="tab-list"] {{
+        background-color: var(--surface-color) !important;
+    }}
+
+    .stTabs [data-baseweb="tab"] {{
+        background-color: var(--surface-color) !important;
+        color: var(--text-secondary-color) !important;
+    }}
+
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {{
+        background-color: var(--primary-color) !important;
+        color: white !important;
+    }}
+
+    /* Barre de progression */
+    .stProgress > div > div > div {{
+        background-color: var(--primary-color) !important;
+    }}
+
+    /* Expander */
+    .streamlit-expanderHeader {{
+        background-color: var(--surface-color) !important;
+        color: var(--text-color) !important;
+    }}
+
+    /* DataFrame */
+    .css-1n76uvr {{
+        background-color: var(--surface-color) !important;
+    }}
+
+    /* Code blocks */
+    .stCodeBlock {{
+        background-color: var(--surface-color) !important;
+        border: 1px solid var(--border-color) !important;
+    }}
+
+    /* Liens */
+    a {{
+        color: var(--primary-color) !important;
+    }}
+
+    /* Texte secondaire */
+    .css-1v0mbdj, .css-10trblm {{
+        color: var(--text-secondary-color) !important;
+    }}
+</style>
+"""
+
+# Injecter le CSS personnalisé
+st.markdown(theme_css, unsafe_allow_html=True)
+
+st.sidebar.markdown("---")
+
+# TEMPORAIREMENT DÉSACTIVÉ POUR DIAGNOSTIC
 # Initialiser et charger le LLM AUTOMATIQUEMENT au premier démarrage
 if 'llm_pipeline' not in st.session_state:
     st.session_state.llm_pipeline = None
@@ -4086,6 +4429,17 @@ if 'llm_pipeline' not in st.session_state:
     st.session_state.clip_processor = None
     st.session_state.clip_device = 'cpu'
     st.session_state.clip_loaded = False
+    st.session_state.use_clip = False  # Par défaut désactivé
+    st.session_state.explanation_cache = {}  # Cache des explications
+    st.session_state.enable_llm = True  # Mode LLM activé par défaut
+    st.session_state.llm_pipeline = None
+    st.session_state.llm_loaded = False
+    st.session_state.llm_loading_attempted = False
+    st.session_state.clip_model = None
+    st.session_state.clip_processor = None
+    st.session_state.clip_device = 'cpu'
+    st.session_state.clip_loaded = False
+    st.session_state.figures_dict = {}  # Dictionnaire pour stocker les figures PDF
     st.session_state.use_clip = False  # Par défaut désactivé
     st.session_state.explanation_cache = {}  # Cache des explications
     st.session_state.enable_llm = True  # Mode LLM activé par défaut
@@ -4110,43 +4464,67 @@ else:
     st.session_state.use_clip = use_clip
 
     # Chargement automatique au premier lancement
-    if not st.session_state.llm_loaded and not st.session_state.llm_loading_attempted:
-        st.session_state.llm_loading_attempted = True
-        with st.sidebar.status("🤖 Chargement automatique du LLM Mistral...", expanded=True) as status:
+    try:
+        if not st.session_state.llm_loaded and not st.session_state.llm_loading_attempted:
+            # Essai rapide d'initialisation automatique silencieuse
             try:
-                st.sidebar.write("📥 Initialisation du modèle LLM...")
                 st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
                 st.session_state.llm_loaded = True
-                
-                # CLIP chargé seulement si l'utilisateur le demande (option checkbox)
-                if use_clip and not st.session_state.clip_loaded:
-                    st.sidebar.write("🖼️ Chargement du modèle CLIP...")
-                    clip_model, clip_processor, clip_device = load_clip_model()
-                    st.session_state.clip_model = clip_model
-                    st.session_state.clip_processor = clip_processor
-                    st.session_state.clip_device = clip_device
-                    st.session_state.clip_loaded = (clip_model is not None)
-                
-                status.update(label="✅ LLM chargé avec succès !", state="complete")
-                st.sidebar.success("💡 Analyses IA activées (LLM Mistral)")
-                
-                # INITIALISER LE SYSTÈME RAG APRÈS LE LLM - VERSION OPTIMISÉE
-                st.sidebar.write("📚 Initialisation ultra-rapide du système RAG...")
+                # Initialiser RAG immédiatement après
                 try:
-                    rag_initialized = initialize_rag_system()
-                    if rag_initialized:
-                        st.sidebar.success("✅ Système RAG actif - Connaissances enrichies")
-                    else:
-                        st.sidebar.warning("⚠️ RAG non disponible - Mode LLM seul")
-                except Exception as rag_error:
-                    st.sidebar.warning(f"⚠️ Erreur RAG : {str(rag_error)[:30]}")
-                        
-            except Exception as e:
-                status.update(label="❌ Erreur de chargement", state="error")
-                st.sidebar.error(f"⚠️ LLM non disponible : {str(e)[:100]}")
-                st.sidebar.info("L'application continuera avec analyses basiques")
+                    initialize_rag_system()
+                except:
+                    pass  # Ne pas bloquer si RAG échoue
+            except:
+                pass  # Échec silencieux, on passera au manuel
+            finally:
+                st.session_state.llm_loading_attempted = True
+    except:
+        pass  # Sécurité maximale
 
-    # Afficher l'état et permettre rechargement manuel
+    # BOUTON DE CHARGEMENT MANUEL TRÈS VISIBLE
+    if not st.session_state.llm_loaded:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 🚀 CHARGEMENT IA MANUEL")
+        st.sidebar.warning("⚠️ LLM non chargé - Analyses basiques uniquement")
+        
+        if st.sidebar.button("🚀 CHARGER LE LLM MAINTENANT", key="manual_llm_load", 
+                           help="Cliquez pour activer les analyses IA intelligentes", 
+                           type="primary"):
+            with st.sidebar.status("🤖 Chargement du LLM en cours...", expanded=True) as status:
+                try:
+                    status.write("📥 Téléchargement et initialisation du modèle IA...")
+                    st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
+                    st.session_state.llm_loaded = True
+                    
+                    status.write("🖼️ Chargement des capacités visuelles (CLIP)...")
+                    if use_clip and not st.session_state.clip_loaded:
+                        clip_model, clip_processor, clip_device = load_clip_model()
+                        st.session_state.clip_model = clip_model
+                        st.session_state.clip_processor = clip_processor
+                        st.session_state.clip_device = clip_device
+                        st.session_state.clip_loaded = (clip_model is not None)
+                    
+                    status.update(label="✅ IA activée avec succès !", state="complete")
+                    st.sidebar.success("💡 Analyses IA complètes activées !")
+                    
+                    # Initialiser RAG après succès
+                    status.write("📚 Activation de la base de connaissances...")
+                    try:
+                        rag_initialized = initialize_rag_system()
+                        if rag_initialized:
+                            st.sidebar.success("✅ Base de connaissances activée")
+                        else:
+                            st.sidebar.warning("⚠️ Base limitée - Mode IA seul")
+                    except Exception as rag_error:
+                        st.sidebar.warning(f"⚠️ Base partielle : {str(rag_error)[:25]}")
+                        
+                    st.rerun()  # Actualiser l'interface
+                    
+                except Exception as e:
+                    status.update(label="❌ Échec du chargement", state="error")
+                    st.sidebar.error(f"❌ Erreur : {str(e)[:60]}")
+                    st.sidebar.info("Réessayez ou continuez avec analyses basiques")
     if st.session_state.llm_loaded:
         st.sidebar.success("✅ LLM Mistral actif - Analyses intelligentes activées")
         if st.session_state.clip_loaded and use_clip:
@@ -4365,14 +4743,21 @@ if st.session_state.get('llm_loaded', False):
     if st.session_state.get('show_rag_dashboard', False):
         show_explanation_dashboard()
 
+# ========== BARRE DE NAVIGATION HORIZONTALE GLISSANTE ==========
+st.markdown("---")
+st.markdown("---")
+
+# Créer les onglets principaux
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "🌡️ Calculateur Réglage Température", 
-    "📊 Analyse Fichiers .dat", 
+    "🌡️ Calculateur Réglage Température",
+    "📊 Analyse Fichiers .dat",
     "🌍 ERT Pseudo-sections 2D/3D",
     "🪨 Stratigraphie Complète (Sols + Eaux)",
     "🔬 Inversion pyGIMLi - ERT Avancée",
     "🖼️ Analyse Spectrale d'Images (Imputation + Reconstruction)"
 ])
+
+# ===================== TAB 1 : TEMPÉRATURE =====================
 
 # ===================== TAB 1 : TEMPÉRATURE =====================
 with tab1:
@@ -4565,7 +4950,7 @@ with tab2:
                 ax.grid(True, alpha=0.3)
                 plt.xticks(rotation=45)
                 plt.tight_layout()
-                st.pyplot(fig_time, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_time, clear_figure=False, use_container_width=True)
                 
                 # Sauvegarder pour PDF
                 figures_dict['temporal_evolution'] = fig_time
@@ -4607,7 +4992,7 @@ with tab2:
             ax.set_title(f'Classification en {n_clusters} groupes', fontsize=13, fontweight='bold')
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
-            st.pyplot(fig_cluster, clear_figure=True, use_container_width=True)
+            st.pyplot(fig_cluster, clear_figure=False, use_container_width=True)
             
             # Sauvegarder pour PDF
             figures_dict['kmeans_clustering'] = fig_cluster
@@ -4678,7 +5063,7 @@ with tab2:
                 ax_water.grid(True, alpha=0.3, linestyle='--', color='white', linewidth=0.5)
                 plt.tight_layout()
                 
-                st.pyplot(fig_water, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_water, clear_figure=False, use_container_width=True)
                 
                 # Sauvegarder pour PDF
                 figures_dict['water_level_section'] = fig_water
@@ -4765,7 +5150,7 @@ with tab2:
                     ax_cbar.axvline(pos, color='white', linewidth=2, linestyle='--', alpha=0.8)
                 
                 plt.tight_layout()
-                st.pyplot(fig_cbar, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_cbar, clear_figure=False, use_container_width=True)
                 plt.close(fig_cbar)
             except Exception as e:
                 st.warning(f"⚠️ Erreur affichage échelle couleurs : {str(e)[:100]}")
@@ -4826,7 +5211,7 @@ with tab2:
                     ax_sea.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_sea, clear_figure=True, use_container_width=True)
+                    st.pyplot(fig_sea, clear_figure=False, use_container_width=True)
                     figures_dict['seawater_section'] = fig_sea
                     
                     # Générer explication dynamique avec le LLM (seulement si activé)
@@ -4914,7 +5299,7 @@ with tab2:
                     ax_saline.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_saline, clear_figure=True, use_container_width=True)
+                    st.pyplot(fig_saline, clear_figure=False, use_container_width=True)
                     figures_dict['saline_section'] = fig_saline
                     
                     # Générer explication dynamique avec le LLM (si activé)
@@ -5000,7 +5385,7 @@ with tab2:
                     ax_fresh.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_fresh, clear_figure=True, use_container_width=True)
+                    st.pyplot(fig_fresh, clear_figure=False, use_container_width=True)
                     figures_dict['freshwater_section'] = fig_fresh
                     
                     # Générer explication dynamique avec le LLM (si activé)
@@ -5086,7 +5471,7 @@ with tab2:
                     ax_pure.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     ax_pure.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     plt.tight_layout()
-                    st.pyplot(fig_pure, clear_figure=True, use_container_width=True)
+                    st.pyplot(fig_pure, clear_figure=False, use_container_width=True)
                     figures_dict['purewater_section'] = fig_pure
                     
                     # Générer explication dynamique avec le LLM (si activé)
@@ -5214,7 +5599,7 @@ with tab2:
                 ax_pseudo.legend(loc='upper right', fontsize=10, framealpha=0.9)
                 
                 plt.tight_layout()
-                st.pyplot(fig_pseudo, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_pseudo, clear_figure=False, use_container_width=True)
                 plt.close()
                 
                 # Statistiques
@@ -5295,9 +5680,24 @@ du bleu (faible résistivité) au rouge (forte résistivité).
                 # Générer PDF avec tous les graphiques et tableaux
                 if st.button("📄 Générer Rapport PDF", key='generate_pdf'):
                     with st.spinner('Génération du PDF en cours...'):
+                        # Fusionner les figures du session_state (coupes géologiques)
+                        if 'figures_dict' in st.session_state:
+                            figures_dict.update(st.session_state['figures_dict'])
+
+                        # DEBUG: Afficher le contenu de figures_dict
+                        st.write(f"DEBUG: figures_dict contient {len(figures_dict)} figures")
+                        for fig_name, fig in figures_dict.items():
+                            st.write(f"DEBUG: Figure '{fig_name}': {'Valide' if fig is not None and plt.fignum_exists(fig.number) else 'Invalide/None'}")
+
                         pdf_bytes = create_pdf_report(df, unit, figures_dict)
                         st.session_state['pdf_buffer'] = pdf_bytes
                         st.success("✅ PDF prêt !")
+
+                        # Nettoyer les figures après génération du PDF pour éviter les fuites mémoire
+                        for fig_name, fig in figures_dict.items():
+                            if fig is not None and plt.fignum_exists(fig.number):
+                                plt.close(fig)
+                        figures_dict.clear()
                 
                 if 'pdf_buffer' in st.session_state:
                     st.download_button(
@@ -5396,7 +5796,7 @@ La couleur d'un point sur la pseudo-section représente donc la valeur de la ré
         ax.grid(True, alpha=0.3, linestyle='--')
         plt.tight_layout()
         
-        st.pyplot(fig_real, clear_figure=True, use_container_width=True)
+        st.pyplot(fig_real, clear_figure=False, use_container_width=True)
         
         # Sauvegarder pour PDF
         figures_tab3['pseudo_section_2d'] = fig_real
@@ -5552,7 +5952,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
                 fig_comp1.colorbar(pcm2, ax=ax2, label='Résistivité mesurée (Ω.m)')
             
             plt.tight_layout()
-            st.pyplot(fig_comp1, clear_figure=True, use_container_width=True)
+            st.pyplot(fig_comp1, clear_figure=False, use_container_width=True)
             figures_tab3['comparative_1'] = fig_comp1
             
             st.markdown("""
@@ -5636,7 +6036,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
                          fontsize=8, va='top')
             
             plt.tight_layout()
-            st.pyplot(fig_comp2, clear_figure=True, use_container_width=True)
+            st.pyplot(fig_comp2, clear_figure=False, use_container_width=True)
             figures_tab3['comparative_2'] = fig_comp2
             
             st.markdown("""
@@ -5764,7 +6164,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
             ax_pseudo_t3.legend(loc='upper right', fontsize=10, framealpha=0.9)
             
             plt.tight_layout()
-            st.pyplot(fig_pseudo_t3, clear_figure=True, use_container_width=True)
+            st.pyplot(fig_pseudo_t3, clear_figure=False, use_container_width=True)
             plt.close()
             
             # Statistiques
@@ -5913,7 +6313,7 @@ with tab4:
                                 cbar_strat.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
                                 
                                 plt.tight_layout()
-                                st.pyplot(fig_strat, clear_figure=True, use_container_width=True)
+                                st.pyplot(fig_strat, clear_figure=False, use_container_width=True)
                                 plt.close()
                             else:
                                 st.info(f"✓ {len(df_filtered)} mesure(s) détectée(s) mais insuffisantes pour interpolation")
@@ -5977,7 +6377,7 @@ with tab4:
             cbar_dist.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
             
             plt.tight_layout()
-            st.pyplot(fig_dist, clear_figure=True, use_container_width=True)
+            st.pyplot(fig_dist, clear_figure=False, use_container_width=True)
             plt.close()
             
             st.markdown("---")
@@ -6285,7 +6685,7 @@ with tab4:
                     ax_pseudo_t4.legend(loc='upper right', fontsize=10, framealpha=0.9)
                     
                     plt.tight_layout()
-                    st.pyplot(fig_pseudo_t4, clear_figure=True, use_container_width=True)
+                    st.pyplot(fig_pseudo_t4, clear_figure=False, use_container_width=True)
                     plt.close()
                     
                     # Statistiques
@@ -6468,7 +6868,7 @@ with tab5:
             cbar_freq.set_label('Résistivité (Ω·m)', fontsize=11, fontweight='bold')
             
             plt.tight_layout()
-            st.pyplot(fig_freq_pseudo, clear_figure=True, use_container_width=True)
+            st.pyplot(fig_freq_pseudo, clear_figure=False, use_container_width=True)
             plt.close()
             
             # Légende d'interprétation
@@ -6513,7 +6913,7 @@ with tab5:
             ax_prof.legend(loc='best', fontsize=10)
             
             plt.tight_layout()
-            st.pyplot(fig_freq_profile, clear_figure=True, use_container_width=True)
+            st.pyplot(fig_freq_profile, clear_figure=False, use_container_width=True)
             plt.close()
             
             # ========== 3 COUPES GÉOLOGIQUES SUPPLÉMENTAIRES DU SOUS-SOL ==========
@@ -6588,7 +6988,7 @@ with tab5:
                 cbar_geo1.set_label('Type d\'Eau', fontsize=11, fontweight='bold')
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo1, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_geo1, clear_figure=False, use_container_width=True)
                 plt.close()
                 
                 st.markdown("""
@@ -6644,7 +7044,7 @@ with tab5:
                 cbar_2b.set_label('|∂ρ/∂z|', fontsize=10, fontweight='bold')
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo2, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_geo2, clear_figure=False, use_container_width=True)
                 plt.close()
                 
                 st.markdown(f"""
@@ -6825,7 +7225,7 @@ with tab5:
                              fontsize=8, framealpha=0.9, ncol=1)
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo3, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_geo3, clear_figure=False, use_container_width=True)
                 plt.close()
                 
                 # TABLEAU DÉTAILLÉ DES FORMATIONS PRÉSENTES
@@ -7113,7 +7513,7 @@ with tab5:
                 plt.tight_layout()
                 
                 # Afficher
-                st.pyplot(fig_pseudo, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_pseudo, clear_figure=False, use_container_width=True)
                 plt.close()
                 
                 # Statistiques de la pseudo-section
@@ -7353,7 +7753,7 @@ with tab5:
                              bbox_to_anchor=(1.02, 0.5), fontsize=8, framealpha=0.95)
                 
                 plt.tight_layout()
-                st.pyplot(fig_grid, clear_figure=True, use_container_width=True)
+                st.pyplot(fig_grid, clear_figure=False, use_container_width=True)
                 plt.close()
                 
                 # Tableau statistique par profondeur
@@ -7570,7 +7970,7 @@ with tab5:
                         cbar.ax.set_yticklabels(['0.1-1', '1-10', '10-100', '> 100'])
 
                         plt.tight_layout()
-                        st.pyplot(fig_pygimli, clear_figure=True, use_container_width=True)
+                        st.pyplot(fig_pygimli, clear_figure=False, use_container_width=True)
                         plt.close()
 
                         # ========== 4 COUPES INVERSÉES SUPPLÉMENTAIRES ==========
@@ -7604,7 +8004,7 @@ with tab5:
                             cbar_inv1.set_label('Résistivité vraie (Ω·m)', fontsize=11, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv1, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_inv1, clear_figure=False, use_container_width=True)
                             plt.close()
                             
                             st.markdown(
@@ -7657,7 +8057,7 @@ with tab5:
                             cbar_inv2.set_label('Type d\'Eau', fontsize=11, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv2, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_inv2, clear_figure=False, use_container_width=True)
                             plt.close()
                             
                             st.markdown("**Interprétation hydrogéologique VRAIE (après inversion, selon tableau) :**\n"
@@ -7708,7 +8108,7 @@ with tab5:
                             cbar_3b.set_label('|∂ρ/∂x|', fontsize=10, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv3, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_inv3, clear_figure=False, use_container_width=True)
                             plt.close()
                             
                             st.markdown(f"**Interprétation des gradients horizontaux :**\n"
@@ -7782,7 +8182,7 @@ with tab5:
                                          fontsize=8, framealpha=0.9, ncol=1)
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv4, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_inv4, clear_figure=False, use_container_width=True)
                             plt.close()
                             
                             st.markdown("**Modèle lithologique VRAI (après inversion pyGIMLi) :**\n\n"
@@ -7864,7 +8264,7 @@ with tab5:
                         ax_classif.legend(handles=legend_elements, loc='upper right')
 
                         plt.tight_layout()
-                        st.pyplot(fig_classif, clear_figure=True, use_container_width=True)
+                        st.pyplot(fig_classif, clear_figure=False, use_container_width=True)
 
                         # Export CSV interprété
                         csv_buffer = io.StringIO()
@@ -8800,7 +9200,7 @@ with tab6:
                     plt.colorbar(scatter, ax=ax2, label='Résistivité (Ω·m)')
 
                     plt.tight_layout()
-                    st.pyplot(fig_spectra, clear_figure=True, use_container_width=True)
+                    st.pyplot(fig_spectra, clear_figure=False, use_container_width=True)
                     
                     # Explication DYNAMIQUE générée par le LLM
                     st.markdown("### 📖 Analyse Automatique (LLM)")
@@ -9105,7 +9505,7 @@ with tab6:
                             plt.colorbar(im3, ax=ax3, label='Δρ (Ω·m)')
 
                             plt.tight_layout()
-                            st.pyplot(fig_impute, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_impute, clear_figure=False, use_container_width=True)
                             
                             # Message de transition
                             st.success("✅ Visualisation générée - Démarrage de l'analyse IA...")
@@ -9327,7 +9727,7 @@ RÉPONDS EN FRANÇAIS. Simple, pédagogique, sans jargon. [/INST]"""
                         ax4.set_ylabel('Amplitude')
 
                         plt.tight_layout()
-                        st.pyplot(fig_forward, clear_figure=True, use_container_width=True)
+                        st.pyplot(fig_forward, clear_figure=False, use_container_width=True)
                         
                         # Explication DYNAMIQUE générée par le LLM
                         st.markdown("### 📖 Explication Automatique (LLM)")
@@ -9490,7 +9890,7 @@ RÉPONDS EN FRANÇAIS. Simple, pédagogique, sans jargon. [/INST]"""
                         axes[1,1].set_yscale('log')
 
                         plt.tight_layout()
-                        st.pyplot(fig_reconstruct, clear_figure=True, use_container_width=True)
+                        st.pyplot(fig_reconstruct, clear_figure=False, use_container_width=True)
                         
                         # Analyse DYNAMIQUE avec CLIP + LLM
                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -9673,7 +10073,7 @@ Lambda régularisation: {lambda_tikhonov}
                                         generated_img_3d,
                                         title=f"Reconstruction 3D - {slice_type} ({depth_str})"
                                     )
-                                    st.pyplot(fig_comp_3d, clear_figure=True, use_container_width=True)
+                                    st.pyplot(fig_comp_3d, clear_figure=False, use_container_width=True)
                                     
                                     # Afficher le prompt
                                     with st.expander("📝 Prompt utilisé"):
@@ -9855,7 +10255,7 @@ Lambda régularisation: {lambda_tikhonov}
                             axes[2].grid(True, alpha=0.3)
 
                         plt.tight_layout()
-                        st.pyplot(fig_trajectories, clear_figure=True, use_container_width=True)
+                        st.pyplot(fig_trajectories, clear_figure=False, use_container_width=True)
                         
                         # Analyse DYNAMIQUE avec CLIP + LLM
                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -9994,7 +10394,7 @@ Dimensions: {n_x}×{n_y}×{n_z}
                                             traj_generated_img,
                                             title=f"Trajectoires Détectées - {traj_emphasis}"
                                         )
-                                        st.pyplot(fig_traj_comparison, clear_figure=True, use_container_width=True)
+                                        st.pyplot(fig_traj_comparison, clear_figure=False, use_container_width=True)
                                         
                                         # Analyse DYNAMIQUE avec CLIP + LLM
                                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -10855,7 +11255,12 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=None,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe1, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_coupe1, clear_figure=False, use_container_width=True)
+                            
+                            # Stocker pour le PDF
+                            if 'figures_dict' not in st.session_state:
+                                st.session_state['figures_dict'] = {}
+                            st.session_state['figures_dict']['coupe_spectrale_brute'] = fig_coupe1
                             
                             st.success(f"✅ Coupe 1 générée : {len(spectra):,} mesures de résistivité visualisées")
                         
@@ -10876,7 +11281,10 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=interpretation_for_plot,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe2, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_coupe2, clear_figure=False, use_container_width=True)
+                            
+                            # Stocker pour le PDF
+                            st.session_state['figures_dict']['coupe_analysee_llm'] = fig_coupe2
                             
                             st.success(f"✅ Coupe 2 générée : Reconstruction 3D avec {rho_3d.size:,} cellules")
                         elif rho_imputed is not None:
@@ -10887,7 +11295,10 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=interpretation_for_plot if show_interpretation else None,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe2, clear_figure=True, use_container_width=True)
+                            st.pyplot(fig_coupe2, clear_figure=False, use_container_width=True)
+                            
+                            # Stocker pour le PDF
+                            st.session_state['figures_dict']['coupe_imputee_llm'] = fig_coupe2
                             
                             st.success(f"✅ Coupe 2 générée : Données imputées avec {rho_imputed.size:,} cellules")
                         
@@ -11037,7 +11448,7 @@ Réponds en français, concis (100-200 mots max). [/INST]"""
             try:
                 result = st.session_state.llm_pipeline(
                     prompt,
-                    max_new_tokens=200,
+                    max_new_tokens=600,  # Augmenté pour réponses complètes
                     temperature=0.7,
                     do_sample=True,
                     return_full_text=False
