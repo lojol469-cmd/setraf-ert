@@ -1,0 +1,170 @@
+services:
+  # Service 1: LifeModo API (Transformers + FastAPI)
+  lifemodo-api:
+    build:
+      context: .
+      dockerfile: docker/lifemodo.Dockerfile
+    container_name: kibalock-lifemodo
+    ports:
+      - "8000:8000"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      - HF_HOME=/models/huggingface
+      - TRANSFORMERS_CACHE=/models/transformers
+    volumes:
+      - ./models:/models
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - kibalock-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Service 2: Backend KibaLock (FAISS + DeepFace + Streamlit)
+  kibalock-backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: kibalock-backend
+    ports:
+      - "8505:8505"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - MONGODB_URI=mongodb://kibalock-mongo:27017/
+      - LIFEMODO_API_URL=http://lifemodo-api:8000
+      - FAISS_INDEX_PATH=/data/faiss_indices
+    volumes:
+      - ./models:/models
+      - ./data:/data
+      - ./logs:/app/logs
+    depends_on:
+      - kibalock-mongo
+      - lifemodo-api
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - kibalock-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8505/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Service 3: TTS Service (isolé avec numpy 1.22)
+  tts-service:
+    build:
+      context: .
+      dockerfile: docker/tts.Dockerfile
+    container_name: kibalock-tts
+    ports:
+      - "8001:8001"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - TTS_MODELS_PATH=/models/tts
+    volumes:
+      - ./models:/models
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - kibalock-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Service 4: Frontend React 3D
+  kibalock-frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: kibalock-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_BACKEND_URL=http://localhost:8505
+      - VITE_TTS_URL=http://localhost:8001
+    depends_on:
+      - lifemodo-api
+      - kibalock-backend
+    networks:
+      - kibalock-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Service 5: MongoDB
+  kibalock-mongo:
+    image: mongo:7.0
+    container_name: kibalock-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=kibalock
+    volumes:
+      - mongo-data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - kibalock-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Service 6: Nginx Reverse Proxy (optionnel)
+  nginx:
+    image: nginx:alpine
+    container_name: kibalock-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - lifemodo-api
+      - kibalock-backend
+      - kibalock-frontend
+    networks:
+      - kibalock-network
+    restart: unless-stopped
+
+networks:
+  kibalock-network:
+    driver: bridge
+
+volumes:
+  mongo-data:
+    driver: local

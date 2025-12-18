@@ -1,0 +1,55 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Logs
+logs
+*.log
+
+# Environment files (ne pas inclure dans l'image)
+.env
+.env.local
+.env.*.local
+.env.auto
+
+# Tests
+test
+tests
+*.test.js
+coverage
+
+# Documentation
+*.md
+!README.md
+docs
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# SSL certificates (gérer via volumes ou secrets)
+ssl
+
+# Deployment files
+docker-compose.yml
+Dockerfile
+.dockerignore
+*.sh

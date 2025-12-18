@@ -1,0 +1,55 @@
+# =====================================================
+# SETRAF - Kubernetes Persistent Volume Claim
+# Volume pour le cache des modèles HuggingFace
+# =====================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: setraf-huggingface-cache
+  namespace: setraf
+  labels:
+    app: setraf
+    component: cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi  # 20 GB pour les modèles IA
+  storageClassName: standard  # Adapter selon votre provider (gp2, pd-standard, etc.)
+
+---
+# PVC pour les données de l'application
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: setraf-data
+  namespace: setraf
+  labels:
+    app: setraf
+    component: data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+# PVC pour les logs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: setraf-logs
+  namespace: setraf
+  labels:
+    app: setraf
+    component: logs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard

@@ -1,0 +1,21 @@
+# Render Deployment Configuration
+# Build command: docker build -t setraf-auth .
+# Start command: node server.js
+
+# Build settings
+buildCommand = "npm install"
+startCommand = "node server.js"
+
+# Environment
+[[envVars]]
+  key = "NODE_ENV"
+  value = "production"
+
+[[envVars]]
+  key = "AUTH_PORT"
+  value = "5000"
+
+# Health check
+[[healthChecks]]
+  path = "/api/health"
+  interval = 30

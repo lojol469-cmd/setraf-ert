@@ -1,0 +1,76 @@
+# =====================================================
+# SETRAF .dockerignore
+# =====================================================
+
+# Dossiers à exclure
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Logs et données temporaires
+logs/
+*.log
+*.log.*
+*.pid
+/tmp/
+
+# Git et IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environnements virtuels
+venv/
+env/
+ENV/
+.venv/
+
+# Fichiers de configuration locaux
+.env.local
+.env.*.local
+
+# Dossier KibaLock (séparé)
+kibalock-api/
+
+# Node.js (sera dans un autre container si nécessaire)
+node-auth/
+
+# Scripts de développement
+*.sh.backup
+*.bak
+*.backup
+*.old
+*.broken
+
+# Documentation
+*.md
+!README.md
+
+# Tests
+test_*.py
+*_test.py
+
+# Données locales
+data/
+uploads/
+exports/
+*.csv
+*.dat
+*.xlsx
+
+# Cache
+.cache/
+.pytest_cache/

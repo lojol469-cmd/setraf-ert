@@ -1,0 +1,143 @@
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║          🐋 SETRAF - Configuration Docker Prête              ║
+║          Subaquifère ERT Analysis Tool                        ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+
+📦 REPOSITORY DOCKER HUB
+   Repository: belikanm/kibaertanalyste
+   URL: https://hub.docker.com/r/belikanm/kibaertanalyste
+
+🏷️ TAGS
+   - 1.0.0 (version stable)
+   - latest (dernière version)
+
+📁 FICHIERS CRÉÉS
+   ✅ Dockerfile                    (1.9 KB) - Image principale
+   ✅ .dockerignore                 (750 B)  - Exclusions
+   ✅ docker-compose.setraf.yml     (2.0 KB) - Orchestration
+   ✅ docker-build.sh               (3.7 KB) - Script de build
+   ✅ docker-push.sh                (4.5 KB) - Script de push
+   ✅ docker-test.sh                (4.6 KB) - Script de test
+   ✅ DOCKER_README.md              (6.5 KB) - Documentation
+
+🚀 WORKFLOW DE DÉPLOIEMENT
+
+   1️⃣  BUILD L'IMAGE
+       cd /home/belikan/KIbalione8/SETRAF
+       ./docker-build.sh
+       
+       ➜ Crée l'image: belikanm/kibaertanalyste:1.0.0
+       ➜ Tag latest automatique
+       ➜ Vérifie les dépendances
+
+   2️⃣  TEST EN LOCAL
+       ./docker-test.sh
+       
+       ➜ Lance container de test
+       ➜ Ouvre http://localhost:8504
+       ➜ Affiche les logs en temps réel
+
+   3️⃣  PUSH VERS DOCKER HUB
+       ./docker-push.sh
+       
+       ➜ Authentification Docker Hub
+       ➜ Push version 1.0.0
+       ➜ Push tag latest
+
+📊 ARCHITECTURE DE L'IMAGE
+
+   Base: python:3.10-slim
+   Taille estimée: ~800 MB
+   
+   Dépendances:
+   ├─ Streamlit 1.28+
+   ├─ PyGIMLi (ERT analysis)
+   ├─ FastAPI (REST API)
+   ├─ NumPy, Pandas, SciPy
+   ├─ Matplotlib, Plotly
+   └─ Scikit-learn
+   
+   Ports exposés:
+   ├─ 8504: ERTest.py (Streamlit)
+   ├─ 8505: api_setraf.py (FastAPI)
+   └─ 8506: ERT.py (Kibali version)
+
+📋 SERVICES INCLUS
+
+   🌊 ERTest.py
+      - Application Streamlit standalone
+      - Analyse ERT avec visualisation 3D
+      - Export PDF haute résolution
+      - Port: 8504
+
+   🔌 api_setraf.py
+      - API REST FastAPI
+      - Endpoints d'analyse ERT
+      - Documentation Swagger
+      - Port: 8505
+
+   🗺️ ERT.py
+      - Version Kibali complète
+      - Intègre ERTest + IA agents
+      - Analyse multi-fréquences
+      - Port: 8506
+
+🎯 UTILISATION RAPIDE
+
+   # Pull depuis Docker Hub
+   docker pull belikanm/kibaertanalyste:latest
+
+   # Run immédiat
+   docker run -d --name setraf -p 8504:8504 belikanm/kibaertanalyste
+
+   # Avec volumes persistants
+   docker run -d --name setraf \
+     -p 8504:8504 \
+     -v ./logs:/app/logs \
+     -v ./data:/app/data \
+     belikanm/kibaertanalyste:latest
+
+   # Accès
+   http://localhost:8504
+
+🔐 PRÉREQUIS
+
+   ⚠️  Docker Desktop avec WSL2 integration activée
+   ⚠️  Compte Docker Hub: belikanm
+   ⚠️  Authentification: docker login
+
+📝 NOTES IMPORTANTES
+
+   1. L'image NE CONTIENT PAS kibalock-api (dossier séparé)
+   2. L'image NE CONTIENT PAS node-auth (service Node.js)
+   3. Focus sur SETRAF uniquement (ERTest + ERT + API)
+   4. PyGIMLi inclus pour analyses géophysiques avancées
+   5. Logo Belikan inclus dans l'image
+
+🌍 DÉPLOIEMENT PRODUCTION
+
+   # Sur serveur distant
+   docker pull belikanm/kibaertanalyste:latest
+   docker run -d \
+     --name setraf-prod \
+     -p 8504:8504 \
+     -v /opt/setraf/logs:/app/logs \
+     -v /opt/setraf/data:/app/data \
+     --restart unless-stopped \
+     belikanm/kibaertanalyste:latest
+
+   # Vérifier santé
+   curl http://localhost:8504/_stcore/health
+
+📞 SUPPORT
+
+   Auteur: Belikan M.
+   Email: nyundumathryme@gmail.com
+   GitHub: github.com/BelikanM/KIbalione8
+   Docker Hub: hub.docker.com/r/belikanm/kibaertanalyste
+
+═══════════════════════════════════════════════════════════════
+                 PRÊT POUR LE DÉPLOIEMENT ! 🚀
+═══════════════════════════════════════════════════════════════

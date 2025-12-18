@@ -1,0 +1,34 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: setraf-config
+  namespace: setraf
+  labels:
+    app: setraf
+data:
+  # Configuration générale
+  environment: "production"
+  auth_port: "5000"
+  streamlit_port: "8504"
+  api_port: "8505"
+  
+  # Configuration Streamlit
+  streamlit_server_address: "0.0.0.0"
+  streamlit_server_headless: "true"
+  streamlit_server_enable_cors: "false"
+  streamlit_server_enable_xsrf_protection: "true"
+  
+  # Configuration Python
+  pythonunbuffered: "1"
+  pythondontwritebytecode: "1"
+  
+  # Limites de ressources
+  max_upload_size: "100"  # MB
+  max_workers: "4"
+  worker_timeout: "600"  # seconds
+  
+  # URLs publiques (à adapter selon votre domaine)
+  public_url_frontend: "https://setraf.infomaniak.ch"
+  public_url_api: "https://setraf.infomaniak.ch/api/ert"
+  public_url_auth: "https://setraf.infomaniak.ch/api/auth"

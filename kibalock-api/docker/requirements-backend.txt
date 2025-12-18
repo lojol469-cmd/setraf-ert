@@ -1,0 +1,36 @@
+# Backend KibaLock Requirements
+# NumPy 2.2.6 compatible - versions flexibles pour compatibilité
+
+streamlit
+streamlit-webrtc
+streamlit-camera-input-live
+
+# Vision & Face
+opencv-python-headless
+deepface
+retina-face
+facenet-pytorch
+mediapipe
+
+# Database
+pymongo
+motor
+
+# Audio
+librosa
+soundfile
+speechrecognition
+
+# ML
+pandas>=2.0.0
+scikit-image
+
+# Security
+bcrypt
+pyjwt
+cryptography
+
+# Utils
+python-dotenv
+psutil
+aiofiles

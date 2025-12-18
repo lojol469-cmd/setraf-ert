@@ -1,0 +1,167 @@
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║     ⚠️  ACTIVATION DE DOCKER DANS WSL2 REQUISE              ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+
+🔧 ÉTAPES D'ACTIVATION
+
+1️⃣  OUVRIR DOCKER DESKTOP
+    - Cliquer sur l'icône Docker dans la barre des tâches Windows
+    - Ouvrir Docker Desktop
+
+2️⃣  ACTIVER L'INTÉGRATION WSL2
+    - Aller dans Settings (icône engrenage ⚙️)
+    - Resources → WSL Integration
+    - Activer "Enable integration with my default WSL distro"
+    - Cocher votre distribution (Ubuntu ou autre)
+    - Cliquer "Apply & Restart"
+
+3️⃣  VÉRIFIER DOCKER DANS WSL2
+    Retourner dans le terminal WSL et tester:
+    
+    docker --version
+    docker ps
+    
+    ✅ Si ça fonctionne, Docker est bien intégré !
+
+═══════════════════════════════════════════════════════════════
+
+🚀 APRÈS ACTIVATION, SUIVRE CES ÉTAPES:
+
+📦 ÉTAPE 1 : BUILD L'IMAGE
+    
+    cd /home/belikan/KIbalione8/SETRAF
+    ./docker-build.sh
+    
+    ⏱️  Durée estimée: 10-15 minutes
+    📦 Taille finale: ~800 MB
+    
+    Cette commande va:
+    ✓ Télécharger l'image Python 3.10-slim
+    ✓ Installer toutes les dépendances (Streamlit, PyGIMLi, etc.)
+    ✓ Copier le code SETRAF
+    ✓ Créer les tags 1.0.0 et latest
+
+📊 ÉTAPE 2 : VÉRIFIER L'IMAGE
+
+    docker images belikanm/kibaertanalyste
+    
+    Vous devriez voir:
+    REPOSITORY                TAG       SIZE
+    belikanm/kibaertanalyste  1.0.0     ~800MB
+    belikanm/kibaertanalyste  latest    ~800MB
+
+🧪 ÉTAPE 3 : TEST LOCAL
+
+    ./docker-test.sh
+    
+    Cette commande va:
+    ✓ Démarrer un container de test
+    ✓ Attendre que Streamlit démarre
+    ✓ Afficher l'URL: http://localhost:8504
+    ✓ Montrer les logs en temps réel
+    
+    📱 Ouvrir dans votre navigateur:
+       http://localhost:8504
+
+🔐 ÉTAPE 4 : SE CONNECTER À DOCKER HUB
+
+    docker login
+    
+    Entrer vos identifiants:
+    - Username: belikanm
+    - Password: [votre mot de passe Docker Hub]
+    
+    ⚠️ Si vous n'avez pas de compte Docker Hub:
+       https://hub.docker.com/signup
+
+📤 ÉTAPE 5 : PUSH VERS DOCKER HUB
+
+    ./docker-push.sh
+    
+    Cette commande va:
+    ✓ Vérifier l'authentification
+    ✓ Push belikanm/kibaertanalyste:1.0.0
+    ✓ Push belikanm/kibaertanalyste:latest
+    
+    ⏱️  Durée: 5-10 minutes (selon connexion)
+
+✅ ÉTAPE 6 : VÉRIFIER SUR DOCKER HUB
+
+    Ouvrir dans le navigateur:
+    https://hub.docker.com/r/belikanm/kibaertanalyste
+    
+    Vous devriez voir vos images publiées !
+
+═══════════════════════════════════════════════════════════════
+
+🎯 UTILISATION APRÈS DÉPLOIEMENT
+
+Une fois l'image sur Docker Hub, n'importe qui peut l'utiliser:
+
+# Télécharger
+docker pull belikanm/kibaertanalyste:latest
+
+# Lancer
+docker run -d --name setraf -p 8504:8504 belikanm/kibaertanalyste
+
+# Accéder
+http://localhost:8504
+
+═══════════════════════════════════════════════════════════════
+
+🐛 DÉPANNAGE
+
+❌ "docker: command not found"
+   → Activer WSL Integration dans Docker Desktop Settings
+
+❌ "Cannot connect to Docker daemon"
+   → Démarrer Docker Desktop (clic sur l'icône)
+
+❌ "denied: requested access to the resource is denied"
+   → Vérifier authentification: docker login
+
+❌ Build échoue avec "no space left"
+   → Nettoyer: docker system prune -a
+
+❌ Port 8504 déjà utilisé
+   → Changer le port: docker run -p 9000:8504 ...
+
+═══════════════════════════════════════════════════════════════
+
+📋 COMMANDES UTILES
+
+# Voir les images
+docker images
+
+# Voir les containers en cours
+docker ps
+
+# Voir tous les containers
+docker ps -a
+
+# Logs d'un container
+docker logs setraf
+
+# Entrer dans un container
+docker exec -it setraf bash
+
+# Arrêter un container
+docker stop setraf
+
+# Supprimer un container
+docker rm setraf
+
+# Nettoyer le système
+docker system prune -a
+
+═══════════════════════════════════════════════════════════════
+
+📞 BESOIN D'AIDE ?
+
+Email: nyundumathryme@gmail.com
+GitHub: https://github.com/BelikanM/KIbalione8
+Docker Hub: https://hub.docker.com/r/belikanm
+
+═══════════════════════════════════════════════════════════════

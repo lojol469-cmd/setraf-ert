@@ -1,0 +1,184 @@
+# =====================================================
+# SETRAF - Kubernetes Deployment
+# Déploiement de l'application SETRAF
+# =====================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: setraf
+  namespace: setraf
+  labels:
+    app: setraf
+    version: v2.0.0
+spec:
+  replicas: 1  # Une seule instance pour l'application Streamlit
+  selector:
+    matchLabels:
+      app: setraf
+  
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  
+  template:
+    metadata:
+      labels:
+        app: setraf
+        version: v2.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8504"
+    
+    spec:
+      # Init container pour préparer les volumes
+      initContainers:
+        - name: init-permissions
+          image: busybox:latest
+          command: ['sh', '-c']
+          args:
+            - |
+              mkdir -p /cache/huggingface /data /logs /uploads /exports
+              chmod -R 777 /cache /data /logs /uploads /exports
+          volumeMounts:
+            - name: huggingface-cache
+              mountPath: /cache/huggingface
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+      
+      containers:
+        - name: setraf
+          image: belikanm/setraf:latest
+          imagePullPolicy: Always
+          
+          ports:
+            - name: streamlit
+              containerPort: 8504
+              protocol: TCP
+            - name: api
+              containerPort: 8505
+              protocol: TCP
+          
+          env:
+            # Configuration depuis ConfigMap
+            - name: STREAMLIT_SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: setraf-config
+                  key: STREAMLIT_SERVER_PORT
+            - name: STREAMLIT_SERVER_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: setraf-config
+                  key: STREAMLIT_SERVER_ADDRESS
+            - name: HF_HOME
+              valueFrom:
+                configMapKeyRef:
+                  name: setraf-config
+                  key: HF_HOME
+            - name: TRANSFORMERS_CACHE
+              valueFrom:
+                configMapKeyRef:
+                  name: setraf-config
+                  key: TRANSFORMERS_CACHE
+            - name: DOWNLOAD_MISTRAL
+              valueFrom:
+                configMapKeyRef:
+                  name: setraf-config
+                  key: DOWNLOAD_MISTRAL
+            
+            # Secrets depuis Secret
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: setraf-secrets
+                  key: HF_TOKEN
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: setraf-secrets
+                  key: TAVILY_API_KEY
+          
+          volumeMounts:
+            # Volume CRITIQUE: Cache HuggingFace
+            - name: huggingface-cache
+              mountPath: /root/.cache/huggingface
+            
+            # Données de l'application
+            - name: data
+              mountPath: /app/data
+            - name: data
+              mountPath: /app/uploads
+              subPath: uploads
+            - name: data
+              mountPath: /app/exports
+              subPath: exports
+            - name: data
+              mountPath: /app/rag_documents
+              subPath: rag_documents
+            - name: data
+              mountPath: /app/vector_db
+              subPath: vector_db
+            - name: data
+              mountPath: /app/ml_models
+              subPath: ml_models
+            
+            # Logs
+            - name: logs
+              mountPath: /app/logs
+          
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2000m"
+            limits:
+              memory: "8Gi"
+              cpu: "4000m"
+          
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8504
+            initialDelaySeconds: 180  # 3 minutes pour le téléchargement des modèles
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8504
+            initialDelaySeconds: 180
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      
+      volumes:
+        - name: huggingface-cache
+          persistentVolumeClaim:
+            claimName: setraf-huggingface-cache
+        - name: data
+          persistentVolumeClaim:
+            claimName: setraf-data
+        - name: logs
+          persistentVolumeClaim:
+            claimName: setraf-logs
+      
+      restartPolicy: Always
+      
+      # Anti-affinity pour éviter plusieurs pods sur le même nœud
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - setraf
+                topologyKey: kubernetes.io/hostname

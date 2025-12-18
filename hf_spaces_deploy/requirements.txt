@@ -1,0 +1,71 @@
+# =====================================================
+# SETRAF - Subaquifère ERT Analysis Tool
+# Requirements Python 3.10+
+# =====================================================
+
+# Interface utilisateur
+streamlit>=1.28.0
+plotly>=5.18.0
+
+# Analyse de données
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Visualisation
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+
+# Traitement de fichiers
+chardet>=5.0.0
+openpyxl>=3.1.0
+
+# PDF Generation
+fpdf2>=2.7.0
+reportlab>=4.0.0
+
+# API (FastAPI)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+pydantic>=2.4.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-dotenv>=1.0.0
+
+# Géophysique ERT
+pygimli>=1.5.0
+
+# Traitement d'images et vision
+pillow>=10.0.0
+opencv-python-headless>=4.8.0
+
+# Machine Learning avancé
+tensorflow>=2.15.0
+keras==2.15.0
+
+# Widgets interactifs (pour interface avancée)
+ipywidgets>=8.1.0
+
+# Utilitaires
+aiofiles>=23.2.0
+python-dateutil>=2.8.0
+
+# Deep Learning & Transformers (ajouté pour téléchargement automatique des modèles)
+torch>=2.0.0
+transformers>=4.36.0,<4.41.0
+sentence-transformers>=2.2.0
+accelerate>=0.25.0
+
+# Base vectorielle FAISS
+faiss-cpu>=1.7.0
+
+# LangChain pour l'intégration LLM
+langchain>=0.1.0
+langchain-text-splitters>=0.0.1
+
+# Traitement PDF
+pypdf>=4.0.0

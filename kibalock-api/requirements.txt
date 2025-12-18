@@ -1,0 +1,70 @@
+# KibaLock API Requirements
+# Système d'authentification biométrique multimodal avec IA
+
+# ============================================
+# CRITICAL: PyTorch avec CUDA 13.0 (RTX 5090)
+# ============================================
+# Installation manuelle requise:
+# pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130
+# torch>=2.10.0.dev (CUDA 13.0 pour sm_120/sm_130)
+
+# Core Web Framework
+fastapi>=0.121.0
+uvicorn[standard]>=0.38.0
+python-multipart>=0.0.20
+aiofiles>=25.0.0
+pydantic>=2.12.0
+pydantic-settings>=2.11.0
+
+# Streamlit Interface
+streamlit>=1.51.0
+streamlit-webrtc>=0.47.1
+streamlit-camera-input-live>=0.2.0
+
+# Database
+pymongo>=4.10.0
+motor>=3.7.0
+python-dotenv>=1.2.0
+
+# Deep Learning & Transformers
+transformers>=4.57.0
+accelerate>=1.11.0
+sentence-transformers>=5.1.0
+
+# LangChain pour Agents IA
+langchain>=1.0.0
+langchain-core>=1.0.0
+langchain-community>=1.0.0
+langchain-huggingface>=0.1.0
+
+# Computer Vision & Face Recognition
+opencv-python>=4.10.0
+facenet-pytorch>=2.6.0
+mediapipe>=0.10.9
+
+# Audio Processing & Voice
+openai-whisper>=20240930
+TTS>=0.22.0
+speechrecognition>=3.10.1
+soundfile>=0.12.1
+librosa>=0.10.1
+
+# Vector Database - FAISS
+faiss-cpu>=1.12.0
+# Pour GPU: pip install faiss-gpu
+
+# Scientific Computing
+numpy>=2.2.0
+scipy>=1.11.4
+scikit-learn>=1.3.2
+pandas>=2.1.4
+
+# Utilities
+Pillow>=12.0.0
+requests>=2.32.0
+psutil>=5.9.7
+
+# Security
+cryptography>=41.0.7
+bcrypt>=4.1.2
+pyjwt>=2.8.0

@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables (IMPORTANT: Ne jamais commiter)
+.env
+.env.local
+.env.*.local
+.env.auto
+
+# Credentials
+render-env-variables.txt
+
+# OS
+.DS_Store
+Thumbs.db
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# SSL certificates
+ssl/
+*.pem
+*.key
+*.cert
+
+# Build outputs
+dist/
+build/
+
+# Docker (optionnel - garder Dockerfile et .dockerignore)
+# docker-compose.yml
+# Dockerfile

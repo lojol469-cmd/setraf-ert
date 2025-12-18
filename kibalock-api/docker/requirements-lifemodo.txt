@@ -1,0 +1,29 @@
+# LifeModo API Requirements
+# NumPy 1.23.5 compatible - versions flexibles
+
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+
+# AI/ML
+transformers
+accelerate
+sentence-transformers
+safetensors
+tokenizers
+
+# LangChain
+langchain
+langchain-core
+langchain-community
+
+# Audio
+openai-whisper
+soundfile
+
+# Utils
+python-dotenv
+requests
+aiofiles
