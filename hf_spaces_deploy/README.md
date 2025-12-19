@@ -1,3 +1,15 @@
+---
+title: SETRAF - ERT Geophysical Analysis
+emoji: 🌍
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: 1.28.0
+app_file: ERTest.py
+pinned: false
+license: mit
+---
+
 # 💧 SETRAF - Subaquifère ERT Analysis Tool
 
 **Version 1.0.0** - Outil d'analyse géophysique avancé pour tomographie électrique (ERT)

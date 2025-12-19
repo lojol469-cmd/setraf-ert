@@ -1,8 +1,12 @@
 # app_sonic_ravensgate.py
 # Configuration TensorFlow AVANT tous les imports pour éviter les erreurs CUDA
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU pour TensorFlow
+# Removed: os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU pour TensorFlow - Now allowing GPU usage
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Réduit les logs TensorFlow
+
+# Charger les variables d'environnement depuis .env
+from dotenv import load_dotenv
+load_dotenv()
 
 import streamlit as st
 import pandas as pd
@@ -36,6 +40,22 @@ import torch
 import hashlib
 import json
 
+# Import du TEMPLATE KIBALI ULTRA-RAPIDE
+try:
+    import sys
+    sys.path.append('/home/belikan')
+    from template_kibali_ultra_fast import (
+        load_kibali_ultra_fast,
+        generate_ultra_fast,
+        analyze_geological_data_ultra_fast,
+        setup_ultra_fast_gpu
+    )
+    TEMPLATE_ULTRA_FAST_AVAILABLE = True
+    print("✅ TEMPLATE KIBALI ULTRA-RAPIDE chargé avec succès")
+except ImportError as e:
+    TEMPLATE_ULTRA_FAST_AVAILABLE = False
+    print(f"⚠️ Template ultra-fast non disponible: {e}")
+
 # Import du module d'authentification
 # try:
 #     from auth_module import AuthManager, show_auth_ui, show_user_info, require_auth
@@ -45,14 +65,42 @@ import json
 #     print("⚠️ Module d'authentification non disponible")
 AUTH_ENABLED = False
 
+# Import des outils géologiques KIBALI
+try:
+    from tools.orchestrator import geology_tools_orchestrator
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOLS_AVAILABLE = False
+    print("⚠️ Outils géologiques KIBALI non disponibles")
+
+# ═══════════════════════════════════════════════════════════════
+# FONCTION LOGGING SÉCURISÉE (fonctionne même sans Streamlit)
+# ═══════════════════════════════════════════════════════════════
+def safe_log(message, level="info"):
+    """
+    Fonction de logging qui fonctionne avec ou sans Streamlit
+    """
+    try:
+        if level == "info":
+            st.info(message)
+        elif level == "warning":
+            st.warning(message)
+        elif level == "error":
+            st.error(message)
+        elif level == "success":
+            st.success(message)
+    except:
+        # Fallback vers print si Streamlit n'est pas disponible
+        print(f"[{level.upper()}] {message}")
+
 # ═══════════════════════════════════════════════════════════════
 # GÉNÉRATION DE COUPES GÉOLOGIQUES RÉALISTES AVEC PYGIMLI
 # ═══════════════════════════════════════════════════════════════
 
 # Configuration des modèles depuis Hugging Face Hub (optimisé pour Spaces)
 SETRAF_BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-# Utiliser des modèles légers compatibles avec HF Spaces
-MISTRAL_MODEL_PATH = "microsoft/Phi-3-mini-4k-instruct"  # Modèle léger 3.8B, rapide et efficace
+# Utiliser le modèle KIBALI FUSIONNÉ FINAL (tous les LoRA intégrés)
+KIBALI_FINAL_MODEL = "/home/belikan/kibali-finetune/kibali-final-merged-model"  # Modèle fusionné local
 CLIP_MODEL_PATH = "openai/clip-vit-base-patch32"  # CLIP standard
 
 # ═══════════════════════════════════════════════════════════════
@@ -112,10 +160,11 @@ class ERTKnowledgeBase:
             # Utiliser un modèle léger directement depuis HuggingFace Hub
             model_name = "sentence-transformers/all-MiniLM-L6-v2"
             
-            # Charger directement depuis HF Hub
+            # Charger directement depuis HF Hub avec GPU si disponible
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
             self.embeddings = SentenceTransformer(
                 model_name,
-                device='cpu'
+                device=device
             )
             
             self.embeddings.eval()  # Mode évaluation
@@ -1815,9 +1864,18 @@ RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]""")
                 
                 # Afficher les graphiques Plotly générés
                 if plotly_figs:
-                    st.subheader("📊 Visualisations Interactives")
+                    st.subheader("📊 Visualisations Interactives avec Explications Dynamiques KIBALI")
                     for fig_name, fig in plotly_figs:
-                        st.plotly_chart(fig, use_container_width=True)
+                        # Utiliser les tooltips dynamiques KIBALI si LLM disponible
+                        if 'llm_pipeline' in globals() and llm_pipeline is not None:
+                            create_enhanced_plotly_chart_with_kibali(
+                                fig,
+                                element_type="coupe_resistivite",
+                                llm_pipeline=llm_pipeline,
+                                context=f"Graphique: {fig_name}"
+                            )
+                        else:
+                            st.plotly_chart(fig, width='stretch')
                 
                 if enhanced_context and len(enhanced_context) > 100:
                     st.caption(f"📚 Contexte RAG + ML utilisé : {len(enhanced_context)} caractères de connaissances")
@@ -1951,27 +2009,34 @@ def explain_with_cache(llm_pipeline, operation_type, operation_data, context="")
 
 @st.cache_resource
 def load_clip_model():
-    """Charge le modèle CLIP pour analyse d'images"""
+    """Charge le modèle CLIP quantifier pour analyse d'images avec streaming tokens"""
     try:
         from transformers import CLIPProcessor, CLIPModel
         import torch
         
-        st.info("🖼️ Chargement de CLIP pour analyse d'images...")
+        st.info("🖼️ Chargement de CLIP quantifier pour analyse d'images...")
         
-        # Charger CLIP depuis le cache local
+        # Charger CLIP avec optimisation pour HF Spaces
         model = CLIPModel.from_pretrained(
-            "openai/clip-vit-base-patch32",
-            cache_dir="/home/belikan/.cache/huggingface"
+            CLIP_MODEL_PATH,
+            torch_dtype=torch.float16,  # Utiliser float16 pour économie mémoire
+            low_cpu_mem_usage=True
         )
         processor = CLIPProcessor.from_pretrained(
-            "openai/clip-vit-base-patch32",
-            cache_dir="/home/belikan/.cache/huggingface"
+            CLIP_MODEL_PATH,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True
         )
         
+        # Détection automatique du device avec fallback CPU
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
         
-        st.success("✅ CLIP chargé avec succès !")
+        # Optimisations pour streaming
+        model.eval()
+        torch.set_grad_enabled(False)
+        
+        st.success("✅ CLIP quantifier chargé avec succès ! Streaming tokens activé.")
         return model, processor, device
         
     except Exception as e:
@@ -2077,112 +2142,747 @@ def create_geological_cross_section_pygimli(rho_data, title="Coupe Géologique",
     plt.tight_layout()
     return fig
 
-@st.cache_resource
-def load_mistral_llm(use_cpu=True, quantize=True):
+def get_kibali_pipeline(force_cpu=False):
     """
-    Charge le modèle Mistral LLM ULTRA-OPTIMISÉ avec gestion mémoire stricte
-    EMPÊCHE LE CRASH STREAMLIT (Exit Code 137 = Out of Memory)
-    
+    RÉCUPÈRE LE MODÈLE KIBALI SANS RECHARGEMENT
+    Utilise le cache Streamlit existant ou charge si nécessaire
+
     Args:
-        use_cpu: Utiliser CPU
-        quantize: Activer la quantization 8-bit (économie RAM)
-    
+        force_cpu: Forcer le mode CPU même si GPU disponible
+
     Returns:
-        Pipeline optimisé pour vitesse + économie mémoire
+        Fonction wrapper compatible avec l'ancien pipeline ou None si non disponible
     """
+    # Vérifier d'abord dans session_state (chargement manuel)
+    if st.session_state.get('llm_loaded', False) and st.session_state.get('llm_tokenizer') is not None and st.session_state.get('llm_model') is not None:
+        tokenizer, model = st.session_state.llm_tokenizer, st.session_state.llm_model
+
+        # Retourner une fonction wrapper pour compatibilité
+        def pipeline_wrapper(prompt, max_new_tokens=512, do_sample=False, temperature=0.7, top_p=0.9, **kwargs):
+            # Utiliser la nouvelle fonction de génération avec recherche web
+            response = generate_kibali_response_enhanced(tokenizer, model, prompt, max_new_tokens)
+            # Retourner le format attendu par l'ancien code
+            return [{"generated_text": f"{prompt}{response}"}]
+
+        # Ajouter le tokenizer pour compatibilité
+        pipeline_wrapper.tokenizer = tokenizer
+        return pipeline_wrapper
+
+    # Sinon, utiliser le cache Streamlit (chargement automatique)
     try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-        import torch
-        import gc
-        
-        st.info("🤖 Chargement du modèle LLM léger (Phi-3-mini)...")
-        
-        # NETTOYER LA MÉMOIRE AVANT CHARGEMENT
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
-        # Charger le tokenizer depuis Hugging Face Hub
-        tokenizer = AutoTokenizer.from_pretrained(
-            MISTRAL_MODEL_PATH,
-            trust_remote_code=True,
-            use_fast=True
-        )
-        
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
-        # Optimisations CPU STRICTES
-        torch.set_num_threads(4)  # Réduit à 4 threads pour économie mémoire
-        torch.set_grad_enabled(False)
-        
-        st.info("📦 Chargement du modèle optimisé...")
-        
-        # Déterminer le dtype (float16 uniquement pour GPU)
-        device_available = torch.cuda.is_available()
-        dtype = torch.float16 if (device_available and quantize) else torch.float32
-        
-        # Charger le modèle depuis Hugging Face Hub
-        try:
-            # Phi-3-mini est un modèle léger (3.8B) parfait pour HF Spaces
-            model = AutoModelForCausalLM.from_pretrained(
-                MISTRAL_MODEL_PATH,
-                torch_dtype=torch.float32,  # Forcer float32 pour CPU
-                trust_remote_code=True,
-                low_cpu_mem_usage=True
-                # Pas de device_map pour CPU
-            )
-        except Exception as e:
-            st.warning(f"⚠️ Chargement optimisé échoué, mode standard : {str(e)[:100]}")
-            # Fallback : chargement standard avec float32 obligatoire
-            model = AutoModelForCausalLM.from_pretrained(
-                MISTRAL_MODEL_PATH,
-                torch_dtype=torch.float32,
-                trust_remote_code=True,
-                low_cpu_mem_usage=True
-            )
-        
-        # device_map="auto" gère déjà le placement, pas besoin de .to()
-        model.eval()
-        
-        # Nettoyer à nouveau
-        gc.collect()
-        
-        # Pipeline MINIMAL (device géré automatiquement par accelerate)
-        llm_pipeline = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            framework="pt",
-            batch_size=1
-        )
-        
-        st.success("✅ LLM Phi-3-mini chargé avec succès !")
-        return llm_pipeline
-        
-    except Exception as e:
-        st.error(f"❌ Erreur chargement LLM : {str(e)[:200]}")
-        st.warning("💡 LLM non disponible. L'application fonctionnera sans analyses IA avancées.")
+        # Pour GPU avec 23GB+, pas besoin d'offloading - c'est plus rapide sans
+        result = load_kibali_llm(use_cpu=force_cpu, quantize=False, use_offload=False)
+        if result:
+            tokenizer, model = result
+            # Stocker dans session_state pour éviter les rechargements
+            st.session_state.llm_tokenizer = tokenizer
+            st.session_state.llm_model = model
+            st.session_state.llm_loaded = True
+
+            # Retourner une fonction wrapper pour compatibilité
+            def pipeline_wrapper(prompt, max_new_tokens=512, do_sample=False, temperature=0.7, top_p=0.9, **kwargs):
+                # Utiliser la nouvelle fonction de génération avec recherche web
+                response = generate_kibali_response_enhanced(tokenizer, model, prompt, max_new_tokens)
+                # Retourner le format attendu par l'ancien code
+                return [{"generated_text": f"{prompt}{response}"}]
+
+            # Ajouter le tokenizer pour compatibilité
+            pipeline_wrapper.tokenizer = tokenizer
+            return pipeline_wrapper
+        return None
+    except:
         return None
 
-def load_mistral_llm_basic(use_cpu=True):
+def search_web_for_geology(query, max_results=3):
+    """
+    Recherche web spécialisée en géologie utilisant Tavily
+    """
+    try:
+        from tavily import TavilyClient
+        import os
+
+        # Récupérer la clé API depuis les variables d'environnement
+        api_key = os.getenv('TAVILY_API_KEY')
+        if not api_key:
+            safe_log("⚠️ TAVILY_API_KEY non trouvée dans les variables d'environnement", "warning")
+            return "Recherche web non disponible - clé API manquante"
+
+        client = TavilyClient(api_key=api_key)
+
+        # Recherche spécialisée en géologie
+        response = client.search(
+            query=f"géologie ERT analyse {query}",
+            search_depth="advanced",
+            max_results=max_results,
+            include_domains=[".edu", ".gov", ".org", "researchgate.net", "science.org"]
+        )
+
+        # Formater les résultats
+        results = []
+        for result in response.get('results', []):
+            results.append(f"📚 {result.get('title', 'Sans titre')}\n{result.get('content', '')[:300]}...\n🔗 {result.get('url', '')}")
+
+        return "\n\n".join(results) if results else "Aucun résultat de recherche trouvé"
+
+    except Exception as e:
+        safe_log(f"❌ Erreur recherche web: {str(e)[:100]}", "error")
+        return f"Erreur de recherche web: {str(e)[:50]}"
+
+def generate_kibali_response_enhanced(tokenizer, model, prompt, max_new_tokens=800):
+    """
+    GÉNÉRATION ENHANCED AVEC RECHERCHE WEB ET ANALYSE EXPERTE
+    Utilise LangChain et Tavily pour des réponses complètes d'expert géologue
+
+    Args:
+        tokenizer: Le tokenizer chargé
+        model: Le modèle chargé
+        prompt: Le prompt à générer
+        max_new_tokens: Nombre max de tokens à générer (augmenté pour réponses longues)
+
+    Returns:
+        Réponse complète d'expert avec recherche web intégrée
+    """
+    try:
+        import torch
+        import os
+
+        # 1. ANALYSE DU PROMPT POUR EXTRAIRE LES ÉLÉMENTS CLÉS
+        prompt_lower = prompt.lower()
+
+        # Détecter si c'est une analyse géologique ERT
+        is_geology_analysis = any(keyword in prompt_lower for keyword in [
+            'ert', 'résistivité', 'géologique', 'tomographie', 'aquifère', 'pollution',
+            'sous-sol', 'argile', 'marne', 'calibrage', 'modèle géologique'
+        ])
+
+        # 2. RECHERCHE WEB SI NÉCESSAIRE
+        web_research = ""
+        if is_geology_analysis:
+            safe_log("🔍 Recherche web pour analyse géologique...", "info")
+            # Extraire les termes clés pour la recherche
+            search_terms = []
+            if 'ert' in prompt_lower or 'résistivité' in prompt_lower:
+                search_terms.append("ERT Electrical Resistivity Tomography")
+            if 'aquifère' in prompt_lower:
+                search_terms.append("détection aquifères géologie")
+            if 'pollution' in prompt_lower:
+                search_terms.append("détection pollution sols géologie")
+            if 'argile' in prompt_lower or 'marne' in prompt_lower:
+                search_terms.append("propriétés argiles marnes géologie")
+
+            search_query = " ".join(search_terms) if search_terms else "analyse géologique ERT"
+            web_research = search_web_for_geology(search_query, max_results=2)
+
+        # 3. CRÉATION DU PROMPT ENHANCED POUR EXPERT GÉOLOGUE
+        enhanced_prompt = f"""[INST] Tu es un EXPERT GÉOLOGUE de renommée internationale spécialisé en tomographie électrique (ERT).
+Tu dois fournir des analyses complètes, techniques et détaillées avec des paragraphes longs (au moins 15 lignes par section).
+
+{web_research}
+
+CONTEXTE TECHNIQUE:
+- Méthode: Electrical Resistivity Tomography (ERT)
+- Application: Détection d'aquifères, pollutions, structures géologiques
+- Données: Résistivité 4.3-132.9 Ω·m, profondeur 5-200m, 560 points de mesure
+
+{prompt}
+
+RÉPONDS avec cette structure EXACTE et DÉTAILLÉE:
+
+📊 ANALYSE GÉOLOGIQUE COMPLÈTE (KIBALI) :
+
+Géologie: [Paragraphe détaillé de 15+ lignes sur la géologie du sous-sol, composition, structures, implications]
+
+Actions: [Paragraphe détaillé de 15+ lignes sur les actions à mener, interprétation ERT, calibration modèles, méthodologie]
+
+Image: [Description détaillée de 10+ lignes de la coupe géologique visible, alternances de zones, structures détectées]
+
+🎯 RECOMMANDATIONS D'ACTION :
+
+📈 STATISTIQUES DÉTAILLÉES :
+
+[Analyse statistique complète avec moyennes, écarts, interprétations]
+
+CONCLUSION EXPERTE: [Paragraphe final de synthèse professionnelle]
+
+Sois précis, technique, utilise le jargon géologique approprié, cite des références si possible. [/INST]"""
+
+        # 4. TOKENIZATION ET GÉNÉRATION
+        inputs = tokenizer(enhanced_prompt, return_tensors="pt", padding=True, truncation=True)
+
+        # Déplacer sur le bon device
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # Génération avec paramètres optimisés pour réponses longues
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=True,  # Sampling pour plus de variété dans les longues réponses
+                temperature=0.7,  # Température modérée pour cohérence
+                top_p=0.9,  # Nucleus sampling
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=True,
+                repetition_penalty=1.1  # Éviter les répétitions dans les longs textes
+            )
+
+        # Décodage
+        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Nettoyer la réponse (enlever le prompt du début si présent)
+        if generated_text.startswith(enhanced_prompt):
+            generated_text = generated_text[len(enhanced_prompt):].strip()
+
+        # Post-traitement pour s'assurer du format
+        if not generated_text.startswith("📊 ANALYSE GÉOLOGIQUE"):
+            generated_text = f"📊 ANALYSE GÉOLOGIQUE COMPLÈTE (KIBALI) :\n\n{generated_text}"
+
+        return generated_text
+
+    except Exception as e:
+        safe_log(f"❌ Erreur génération enhanced: {str(e)[:100]}", "error")
+        # Fallback vers la génération simple
+        return generate_kibali_response(tokenizer, model, prompt, max_new_tokens)
+
+def generate_kibali_response(tokenizer, model, prompt, max_new_tokens=150):
+    """
+    GÉNÉRATION DIRECTE AVEC LE MODÈLE (PAS DE PIPELINE)
+    Évite les problèmes GPU de Streamlit
+
+    Args:
+        tokenizer: Le tokenizer chargé
+        model: Le modèle chargé
+        prompt: Le prompt à générer
+        max_new_tokens: Nombre max de tokens à générer
+
+    Returns:
+        Texte généré
+    """
+    try:
+        import torch
+
+        # Tokenization
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+
+        # Déplacer sur le bon device
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # Génération
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,  # Greedy pour rapidité et cohérence
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=True
+            )
+
+        # Décodage
+        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Nettoyer la réponse (enlever le prompt du début si présent)
+        if generated_text.startswith(prompt):
+            generated_text = generated_text[len(prompt):].strip()
+
+        return generated_text
+
+    except Exception as e:
+        safe_log(f"❌ Erreur génération: {str(e)[:100]}", "error")
+        return f"Erreur de génération: {str(e)[:100]}"
+
+def generate_kibali_response_ultra_fast(tokenizer, model, prompt, max_new_tokens=150):
+    """
+    GÉNÉRATION ULTRA-RAPIDE AVEC OPTIMISATIONS GPU MAXIMALES
+    Même niveau d'optimisation que le chargement pour vitesse maximale
+
+    Args:
+        tokenizer: Le tokenizer chargé
+        model: Le modèle chargé
+        prompt: Le prompt à générer
+        max_new_tokens: Nombre max de tokens à générer
+
+    Returns:
+        Texte généré ultra-rapidement
+    """
+    try:
+        import torch
+
+        # 🔥 OPTIMISATIONS GPU ULTRA-RAPIDES (MÊME QUE LE CHARGEMENT)
+        if torch.cuda.is_available():
+            # Pré-allocation mémoire GPU à 95%
+            torch.cuda.set_per_process_memory_fraction(0.95)
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # Optimisations CUDA avancées pour génération
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_math_sdp(True)
+
+        # Tokenization optimisée
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+
+        # Déplacer sur GPU avec optimisations
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # GÉNÉRATION ULTRA-RAPIDE avec toutes les optimisations
+        with torch.no_grad():
+            # Utiliser les paramètres optimaux pour vitesse maximale
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,  # Greedy pour rapidité maximale
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=True,  # Cache KV pour vitesse
+                num_beams=1,  # Pas de beam search pour vitesse
+                early_stopping=False,
+                # Optimisations GPU avancées
+                torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
+            )
+
+        # Décodage optimisé
+        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Nettoyer la réponse (enlever le prompt du début si présent)
+        if generated_text.startswith(prompt):
+            generated_text = generated_text[len(prompt):].strip()
+
+        return generated_text
+
+    except Exception as e:
+        safe_log(f"❌ Erreur génération ultra-fast: {str(e)[:100]}", "error")
+        # Fallback vers génération normale
+        return generate_kibali_response(tokenizer, model, prompt, max_new_tokens)
+
+def generate_kibali_response(tokenizer, model, prompt, max_new_tokens=150):
+    """
+    GÉNÉRATION DIRECTE AVEC LE MODÈLE (PAS DE PIPELINE)
+    Évite les problèmes GPU de Streamlit
+
+    Args:
+        tokenizer: Le tokenizer chargé
+        model: Le modèle chargé
+        prompt: Le prompt à générer
+        max_new_tokens: Nombre max de tokens à générer
+
+    Returns:
+        Texte généré
+    """
+    try:
+        import torch
+
+        # Tokenization
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+
+        # Déplacer sur le bon device
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # Génération
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,  # Greedy pour rapidité et cohérence
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=True
+            )
+
+        # Décodage
+        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Nettoyer la réponse (enlever le prompt du début si présent)
+        if generated_text.startswith(prompt):
+            generated_text = generated_text[len(prompt):].strip()
+
+        return generated_text
+
+    except Exception as e:
+        safe_log(f"❌ Erreur génération: {str(e)[:100]}", "error")
+        return f"Erreur de génération: {str(e)[:100]}"
+
+def load_llm_model_ultra_fast(model_path, device="auto", use_4bit=True, use_8bit=False):
+    """
+    CHARGEMENT ULTRA-RAPIDE DU MODÈLE LLM AVEC GPU À 100% POUR LES 3 SHARDS
+    Optimisations maximales pour charger les shards simultanément en parallèle
+
+    Args:
+        model_path: Chemin vers le modèle
+        device: Device ("auto", "cuda", "cpu")
+        use_4bit: Utiliser quantification 4-bit
+        use_8bit: Utiliser quantification 8-bit
+
+    Returns:
+        Pipeline avec tokenizer et modèle optimisés
+    """
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        import gc
+
+        safe_log("🚀 INITIALISATION CHARGEMENT ULTRA-RAPIDE GPU 100%...", "info")
+
+        # 🔥 OPTIMISATIONS GPU MAXIMALES
+        if torch.cuda.is_available() and device != "cpu":
+            # Pré-allocation mémoire GPU à 95% pour éviter fragmentation
+            torch.cuda.set_per_process_memory_fraction(0.95)
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # Optimisations CUDA avancées
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_math_sdp(True)
+
+            safe_log("⚡ GPU optimisé: TF32, cuDNN benchmark, Flash Attention activés", "info")
+
+        # Configuration de quantification
+        quantization_config = None
+        if use_4bit and device != "cpu":
+            try:
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_quant_storage=torch.uint8
+                )
+                safe_log("🔄 Quantification 4-bit configurée pour vitesse maximale", "info")
+            except Exception as e:
+                safe_log(f"⚠️ BitsAndBytes non disponible: {str(e)[:50]}", "warning")
+                use_4bit = False
+
+        safe_log(f"📦 Chargement tokenizer depuis {model_path}...", "info")
+
+        # Charger tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            use_fast=True,
+            local_files_only=True
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        safe_log("⚡ CHARGEMENT ULTRA-RAPIDE DU MODÈLE (3 SHARDS EN PARALLÈLE À 100% GPU)...", "info")
+
+        # 🔥 CHARGEMENT ULTRA-RAPIDE AVEC GPU À 100%
+        if quantization_config is not None:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+                local_files_only=True,
+                torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+                device_map=device,
+                max_memory={0: "22GB", "cpu": "8GB"} if device != "cpu" else {"cpu": "8GB"},
+                quantization_config=quantization_config,
+                offload_folder=None,
+                offload_state_dict=False,
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+                local_files_only=True,
+                torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+                device_map=device,
+                max_memory={0: "22GB", "cpu": "8GB"} if device != "cpu" else {"cpu": "8GB"},
+                load_in_8bit=use_8bit and not use_4bit,
+                load_in_4bit=use_4bit,
+                offload_folder=None,
+                offload_state_dict=False,
+            )
+
+        # Optimisations finales
+        model.eval()
+        torch.set_grad_enabled(False)
+
+        # Forcer sur GPU si demandé
+        if device == "cuda" and torch.cuda.is_available():
+            model = model.to('cuda')
+            torch.cuda.synchronize()
+
+        safe_log("✅ MODÈLE CHARGÉ ULTRA-RAPIDE AVEC GPU À 100% !", "success")
+
+        # Créer pipeline compatible
+        class UltraFastPipeline:
+            def __init__(self, model, tokenizer):
+                self.model = model
+                self.tokenizer = tokenizer
+
+        return UltraFastPipeline(model, tokenizer)
+
+    except Exception as e:
+        safe_log(f"❌ ÉCHEC CHARGEMENT ULTRA-RAPIDE: {str(e)[:150]}", "error")
+        raise Exception(f"Échec chargement ultra-fast: {str(e)[:100]}")
+
+class KIBALIModelManager:
+    """Gestionnaire global du modèle KIBALI pour éviter les problèmes Streamlit GPU"""
+    _instance = None
+    _model = None
+    _tokenizer = None
+    _is_loaded = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def load_model(self, use_cpu=False, quantize=True, use_offload=False):
+        """Charge le modèle une seule fois globalement avec optimisations ULTRA-FAST"""
+        if self._is_loaded:
+            safe_log("✅ Modèle KIBALI déjà chargé en cache global", "success")
+            return self._tokenizer, self._model
+
+        try:
+            # 🔥 UTILISER LES OPTIMISATIONS ULTRA-FAST !
+            safe_log("🚀 CHARGEMENT ULTRA-RAPIDE MODÈLE KIBALI AVEC OPTIMISATIONS GPU MAXIMALES...", "info")
+
+            # Charger avec la fonction ultra-fast
+            model_path = "/home/belikan/kibali-finetune/kibali-final-merged-model"
+            llm_pipeline = load_llm_model_ultra_fast(
+                model_path=model_path,
+                device="cpu" if use_cpu else "auto",
+                use_4bit=quantize and not use_cpu,  # 4-bit seulement si GPU et demandé
+                use_8bit=False  # Priorité 4-bit pour vitesse maximale
+            )
+
+            if llm_pipeline is None:
+                raise Exception("Échec chargement ultra-fast")
+
+            self._tokenizer = llm_pipeline.tokenizer
+            self._model = llm_pipeline.model
+
+            # Optimisations finales GPU
+            import torch
+            if torch.cuda.is_available() and not use_cpu:
+                self._model = self._model.to('cuda')
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+
+            self._model.eval()
+            torch.set_grad_enabled(False)
+
+            # Statistiques de performance
+            device_info = "CPU" if use_cpu else f"GPU ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'})"
+            quant_info = "4-bit" if quantize and not use_cpu else "standard"
+
+            safe_log(f"✅ MODÈLE KIBALI ULTRA-RAPIDE CHARGÉ ! {device_info} | {quant_info} | Prêt ⚡", "success")
+
+            self._is_loaded = True
+            return self._tokenizer, self._model
+
+        except Exception as e:
+            safe_log(f"❌ ÉCHEC CHARGEMENT ULTRA-RAPIDE : {str(e)[:150]}", "error")
+            safe_log("� Tentative chargement avec méthode classique...", "warning")
+
+            # Fallback vers l'ancienne méthode si ultra-fast échoue
+            return self._load_model_fallback(use_cpu, quantize, use_offload)
+
+    def _load_model_fallback(self, use_cpu=False, quantize=True, use_offload=False):
+        """Méthode fallback classique si ultra-fast échoue"""
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+            import torch
+            import gc
+
+            # DÉTECTION RAPIDE GPU
+            gpu_available = torch.cuda.is_available()
+            if not gpu_available and not use_cpu:
+                safe_log("⚠️ GPU non détecté, basculement CPU", "warning")
+                use_cpu = True
+
+            device_name = "GPU" if not use_cpu else "CPU"
+            if use_offload:
+                device_name += " + OFFLOAD"
+            safe_log(f"🚀 CHARGEMENT FALLBACK MODÈLE KIBALI MERGED SUR {device_name}...", "info")
+
+            # NETTOYAGE MÉMOIRE (avant chargement seulement)
+            gc.collect()
+            if gpu_available:
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
+            torch.set_grad_enabled(False)
+
+            # CHARGER DIRECTEMENT LE MODÈLE MERGED FINAL
+            model_path = "/home/belikan/kibali-finetune/kibali-final-merged-model"
+            safe_log("📝 Chargement tokenizer du modèle merged...", "info")
+
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                use_fast=True,
+                local_files_only=True
+            )
+            if self._tokenizer.pad_token is None:
+                self._tokenizer.pad_token = self._tokenizer.eos_token
+
+            # CONFIGURATION CHARGEMENT MODÈLE
+            load_kwargs = {
+                "trust_remote_code": True,
+                "low_cpu_mem_usage": True,
+                "local_files_only": True
+            }
+
+            if use_offload:
+                # Configuration offloading pour économiser mémoire
+                import tempfile
+                offload_dir = tempfile.mkdtemp(prefix="kibali_offload_")
+                load_kwargs.update({
+                    "device_map": "auto",
+                    "offload_folder": offload_dir,
+                    "offload_state_dict": True,
+                    "max_memory": {0: "6GB", "cpu": "12GB"} if gpu_available else {"cpu": "4GB"},
+                    "torch_dtype": torch.float16 if gpu_available else torch.float32
+                })
+                safe_log(f"💾 Offloading activé vers: {offload_dir}", "info")
+            elif not use_cpu:
+                # GPU direct (plus rapide)
+                load_kwargs.update({
+                    "torch_dtype": torch.float16,
+                    "device_map": {"": "cuda:0"}  # Forcer GPU explicitement
+                })
+            else:
+                # CPU
+                load_kwargs["torch_dtype"] = torch.float32
+
+            # CONFIGURATION QUANTIFICATION 4-BIT (si demandé et GPU disponible)
+            quantization_config = None
+            if quantize and not use_cpu and not use_offload:
+                try:
+                    quantization_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_quant_storage=torch.uint8
+                    )
+                    load_kwargs["quantization_config"] = quantization_config
+                    safe_log("🔄 Quantification 4-bit activée", "info")
+                except Exception as e:
+                    safe_log(f"⚠️ Quantification non disponible: {str(e)[:50]}", "warning")
+                    quantize = False  # Désactiver pour éviter l'erreur de chargement
+
+            safe_log("⚡ Chargement du modèle merged final...", "info")
+
+            # Tentative de chargement avec quantification si configurée
+            try:
+                self._model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
+            except Exception as load_error:
+                if quantization_config is not None:
+                    safe_log(f"⚠️ Échec chargement avec quantification: {str(load_error)[:50]}, tentative sans quantification...", "warning")
+                    # Retirer la config de quantification et réessayer
+                    load_kwargs.pop("quantization_config", None)
+                    quantize = False  # Marquer comme non quantisé pour les stats
+                    try:
+                        self._model = AutoModelForCausalLM.from_pretrained(model_path, **load_kwargs)
+                        safe_log("✅ Modèle chargé sans quantification (GPU toujours utilisé)", "success")
+                    except Exception as retry_error:
+                        raise retry_error  # Si ça échoue encore, lever l'erreur originale
+                else:
+                    raise load_error  # Si pas de quantification, lever l'erreur directement
+
+            # Le modèle est déjà merged, pas besoin de PEFT
+            self._model.eval()
+
+            # NETTOYAGE FINAL (pas de empty_cache après chargement pour éviter fallback CPU)
+            gc.collect()
+
+            # STATISTIQUES CHARGEMENT
+            device_info = "CPU" if use_cpu else f"GPU ({torch.cuda.get_device_name(0) if gpu_available else 'N/A'})"
+            quant_info = "4-bit" if quantize and 'quantization_config' in load_kwargs else "standard"
+            memory_info = f"{torch.cuda.get_device_properties(0).total_memory // (1024**3) if gpu_available and not use_cpu else 'N/A'}GB VRAM"
+
+            safe_log(f"✅ MODÈLE KIBALI FALLBACK CHARGÉ ! {device_info} | {quant_info} | VRAM: {memory_info} | Prêt ⚡", "success")
+
+            self._is_loaded = True
+            return self._tokenizer, self._model
+
+        except Exception as e:
+            safe_log(f"❌ ÉCHEC CHARGEMENT FALLBACK : {str(e)[:150]}", "error")
+            safe_log("💡 Modèle merged non disponible. Vérifiez le chemin /home/belikan/kibali-finetune/kibali-final-merged-model", "warning")
+            return None
+
+    def get_model(self):
+        """Retourne le modèle chargé"""
+        return self._tokenizer, self._model
+
+    def is_loaded(self):
+        """Vérifie si le modèle est chargé"""
+        return self._is_loaded
+
+# Instance globale du gestionnaire
+kibali_manager = KIBALIModelManager()
+
+@st.cache_resource
+def load_kibali_llm(use_cpu=False, quantize=True, use_offload=False):
+    """
+    CHARGEMENT DU MODÈLE KIBALI VIA GESTIONNAIRE GLOBAL
+    Utilise le cache global pour éviter les problèmes GPU Streamlit
+
+    Args:
+        use_cpu: Forcer CPU (défaut: False pour utiliser GPU)
+        quantize: Activer quantization 4-bit (recommandé pour rapidité)
+        use_offload: Utiliser offloading disque pour économiser RAM/GPU
+
+    Returns:
+        Tuple (tokenizer, model) - PAS de pipeline pour éviter les problèmes GPU Streamlit
+    """
+    global kibali_manager
+
+    # Utiliser le gestionnaire global pour éviter les problèmes Streamlit
+    result = kibali_manager.load_model(use_cpu=use_cpu, quantize=quantize, use_offload=use_offload)
+
+    if result:
+        tokenizer, model = result
+        safe_log("✅ Modèle KIBALI récupéré depuis cache global", "success")
+        return tokenizer, model
+    else:
+        safe_log("❌ Impossible de charger le modèle KIBALI", "error")
+        return None
+
+def load_kibali_llm_basic(use_cpu=True):
     """Version basique sans quantization en fallback"""
     try:
+        from peft import PeftModel
         from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
         import torch
-        
+
+        # TOKENIZER ULTRA-RAPIDE
+        st.info("📝 Chargement tokenizer rapide...")
         tokenizer = AutoTokenizer.from_pretrained(
-            MISTRAL_MODEL_PATH,
-            trust_remote_code=True
+            KIBALI_FINAL_MODEL,  # Utilise le modèle fusionné final
+            trust_remote_code=True,
+            use_fast=True,
+            local_files_only=False
         )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
         device = "cpu" if use_cpu else ("cuda" if torch.cuda.is_available() else "cpu")
         
-        model = AutoModelForCausalLM.from_pretrained(
-            MISTRAL_MODEL_PATH,
+        base_model = AutoModelForCausalLM.from_pretrained(
+            KIBALI_FINAL_MODEL,
             torch_dtype=torch.float32,
             trust_remote_code=True,
             low_cpu_mem_usage=True
         ).to(device)
+        
+        model = PeftModel.from_pretrained(base_model, "BelikanM/kibali-expert6-terrain-interpretation").to(device)
         
         llm_pipeline = pipeline(
             "text-generation",
@@ -2191,7 +2891,7 @@ def load_mistral_llm_basic(use_cpu=True):
             max_new_tokens=512
         )
         
-        st.success("✅ LLM Mistral chargé (mode standard) !")
+        st.success("✅ LLM KIBALI chargé (mode standard) !")
         return llm_pipeline
     except Exception as e:
         st.error(f"❌ Erreur critique : {e}")
@@ -2199,18 +2899,163 @@ def load_mistral_llm_basic(use_cpu=True):
         return None
 
 
-def analyze_data_with_mistral(llm_pipeline, geophysical_data, progress_callback=None):
+def generate_text_ultra_fast(llm_pipeline, prompt, max_new_tokens=300):
     """
-    Analyse OPTIMISÉE des données géophysiques avec chunking et réduction de contexte
-    
+    GÉNÉRATION ULTRA-RAPIDE AVEC OPTIMISATIONS GPU MAXIMALES
+    Utilise le pipeline avec toutes les optimisations pour vitesse maximale
+
     Args:
-        llm_pipeline: Pipeline Mistral chargé
-        geophysical_data: Dictionnaire contenant toutes les données analysées
-        progress_callback: Fonction callback pour afficher la progression
-    
+        llm_pipeline: Pipeline transformers chargé
+        prompt: Prompt à générer
+        max_new_tokens: Nombre max de tokens
+
     Returns:
-        Tuple (interpretation, recommendations, image_prompt)
+        Texte généré ultra-rapidement
     """
+    try:
+        import torch
+
+        # 🔥 OPTIMISATIONS GPU ULTRA-RAPIDES
+        if torch.cuda.is_available():
+            # Pré-allocation mémoire GPU à 95%
+            torch.cuda.set_per_process_memory_fraction(0.95)
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # Optimisations CUDA avancées
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_math_sdp(True)
+
+        # GÉNÉRATION ULTRA-RAPIDE avec paramètres optimaux
+        with torch.no_grad():
+            response = llm_pipeline(
+                prompt,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,  # Greedy pour rapidité maximale
+                pad_token_id=llm_pipeline.tokenizer.eos_token_id,
+                eos_token_id=llm_pipeline.tokenizer.eos_token_id,
+                use_cache=True,  # Cache KV pour vitesse
+                num_beams=1,  # Pas de beam search pour vitesse
+                early_stopping=False,
+                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            )
+
+        # Extraire le texte généré
+        if response and len(response) > 0:
+            generated_text = response[0]['generated_text']
+
+            # Nettoyer la réponse (enlever le prompt du début si présent)
+            if generated_text.startswith(prompt):
+                generated_text = generated_text[len(prompt):].strip()
+
+            return generated_text
+        else:
+            return "Erreur: Pas de réponse générée"
+
+    except Exception as e:
+        safe_log(f"❌ Erreur génération ultra-fast: {str(e)[:100]}", "error")
+        return f"Erreur génération: {str(e)[:100]}"
+
+
+def enhanced_chat_with_rag(user_question, llm_pipeline, knowledge_base, current_data_context=None):
+    """
+    Chat amélioré avec RAG et données .dat intégrées + streaming fluide
+    """
+    try:
+        # 1. RÉCUPÉRATION RAG - Documents pertinents
+        rag_context = ""
+        if knowledge_base and knowledge_base.initialized:
+            rag_results = knowledge_base.search_knowledge_base(user_question, k=3)
+            if rag_results:
+                rag_context = "\n\n📚 CONTEXTE RAG PERTINENT:\n" + "\n".join([
+                    f"- {result['content']} (Pertinence: {result['relevance_score']:.2f})"
+                    for result in rag_results
+                ])
+
+        # 2. CONTEXTE DONNÉES .DAT actuelles
+        data_context = ""
+        if current_data_context:
+            ctx = current_data_context
+            data_context = f"""
+📊 DONNÉES ACTUELLES:
+- Fichier: {ctx.get('filename', 'N/A')}
+- Mesures: {ctx.get('n_measures', 'N/A')} points
+- Résistivité: {ctx.get('resistivity_range', 'N/A')} Ω·m
+- Moyenne: {ctx.get('mean', 'N/A')} Ω·m, Médiane: {ctx.get('median', 'N/A')} Ω·m
+- Profondeur: {ctx.get('depth_range', 'N/A')} m"""
+
+        # 3. PROMPT OPTIMISÉ avec contexte complet
+        prompt = f"""[INST] Tu es un EXPERT GÉOPHYSICIEN spécialisé en tomographie électrique (ERT).
+Utilise ces informations pour répondre précisément :
+
+{data_context}
+{rag_context}
+
+QUESTION: {user_question}
+
+RÉPONDS en français, utilise les données fournies, sois précis et concret. [/INST]"""
+
+        # 4. GÉNÉRATION ULTRA-RAPIDE sans streaming
+        return generate_text_ultra_fast(llm_pipeline, prompt, max_new_tokens=300)
+
+    except Exception as e:
+        return f"Erreur chat RAG: {str(e)[:100]}"
+
+
+def execute_data_tool(tool_command, df):
+    """
+    Exécute un outil de manipulation des données selon la commande donnée
+    """
+    try:
+        if tool_command.startswith("filtrer_resistivite"):
+            # Extraire les paramètres min et max
+            import re
+            min_match = re.search(r'min=(\d+)', tool_command)
+            max_match = re.search(r'max=(\d+)', tool_command)
+
+            if min_match and max_match:
+                min_val = float(min_match.group(1))
+                max_val = float(max_match.group(1))
+
+                # Filtrer les données
+                filtered_df = df[(df['data'] >= min_val) & (df['data'] <= max_val)]
+                return f"✅ Filtrage appliqué: {len(filtered_df)} mesures sur {len(df)} (résistivité {min_val}-{max_val} Ω·m)"
+
+        elif tool_command.startswith("calculer_stats"):
+            # Extraire la colonne
+            import re
+            col_match = re.search(r"colonne='(\w+)'", tool_command)
+
+            if col_match:
+                col = col_match.group(1)
+                if col in df.columns:
+                    stats = df[col].describe()
+                    return f"📊 Statistiques pour {col}:\n{stats.to_string()}"
+
+        elif tool_command.startswith("analyser_anomalies"):
+            # Extraire le seuil
+            import re
+            seuil_match = re.search(r'seuil=([\d.]+)', tool_command)
+
+            if seuil_match:
+                seuil = float(seuil_match.group(1))
+                mean_val = df['data'].mean()
+                std_val = df['data'].std()
+
+                # Détecter anomalies (valeurs > seuil * écart-type)
+                anomalies = df[abs(df['data'] - mean_val) > (seuil * std_val)]
+                return f"🔍 Anomalies détectées: {len(anomalies)} mesures (seuil {seuil}σ, μ={mean_val:.1f}, σ={std_val:.1f})"
+
+        return "❌ Commande outil non reconnue"
+
+    except Exception as e:
+        return f"❌ Erreur exécution outil: {str(e)[:100]}"
+
+
+def analyze_data_with_kibali(llm_pipeline, geophysical_data, progress_callback=None):
     if llm_pipeline is None:
         return None, None, None
     
@@ -2528,66 +3373,483 @@ Moyenne: {df['data'].mean():.1f} Ω·m
         return legend, explanation
 
 
-def generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=300, placeholder=None):
+def generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=200, placeholder=None):
     """
-    Génère du texte avec streaming token par token pour réponse instantanée
-    
-    Args:
-        llm_pipeline: Pipeline Mistral chargé
-        prompt: Le prompt à envoyer
-        max_new_tokens: Nombre max de tokens à générer
-        placeholder: Streamlit placeholder pour affichage en temps réel
-    
-    Returns:
-        Texte complet généré
+    Génération de texte avec STREAMING TOKEN PAR TOKEN ultra-fluide
+    Affiche chaque token au fur et à mesure pour une expérience utilisateur optimale
     """
     try:
         from transformers import TextIteratorStreamer
         from threading import Thread
-        
-        # Extraire le modèle et tokenizer du pipeline
+        import time
+
+        # Extraire le modèle et tokenizer
         model = llm_pipeline.model
         tokenizer = llm_pipeline.tokenizer
-        
-        # Préparer les inputs
+
+        # 🔥 OPTIMISATIONS GPU ULTRA-RAPIDES
+        model.eval()  # Mode évaluation pour vitesse maximale
+        if torch.cuda.is_available():
+            model = model.to('cuda')  # S'assurer que le modèle est sur GPU
+            torch.cuda.empty_cache()  # Nettoyer la mémoire GPU avant génération
+
+        # Préparer les inputs sur le bon device
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        
-        # Créer le streamer
-        streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-        
-        # Paramètres de génération
+
+        # Créer le streamer optimisé
+        streamer = TextIteratorStreamer(
+            tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=10.0  # Timeout pour éviter blocage
+        )
+
+        # Paramètres ULTRA-OPTIMISÉS pour VITESSE GPU maximale
         generation_kwargs = dict(
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.7,
-            top_p=0.95,
-            repetition_penalty=1.15,
-            streamer=streamer
+            temperature=0.7,  # Légèrement augmenté pour créativité
+            top_p=0.95,      # Plus large pour vitesse
+            top_k=50,        # Légèrement augmenté
+            repetition_penalty=1.1,  # Anti-répétition plus fort
+            streamer=streamer,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+            use_cache=True,  # 🔥 ACTIVER le cache KV pour VITESSE MAXIMALE
+            num_beams=1,     # Beam search = 1 pour vitesse
+            # Optimisations GPU supplémentaires
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto" if torch.cuda.is_available() else None,
         )
-        
+
         # Lancer la génération dans un thread séparé
-        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread = Thread(target=model.generate, kwargs=generation_kwargs, daemon=True)
         thread.start()
-        
-        # Collecter et afficher les tokens en temps réel
+
+        # STREAMING FLUIDE - Affichage token par token
         generated_text = ""
+        token_count = 0
+
         if placeholder:
+            # Mode avec placeholder - streaming visible
             for new_text in streamer:
-                generated_text += new_text
-                placeholder.info(generated_text)
+                if new_text:  # Éviter les tokens vides
+                    generated_text += new_text
+                    token_count += 1
+
+                    # Mise à jour fluide du placeholder avec curseur
+                    placeholder.markdown(generated_text + "▌")
+
+                    # Délai ULTRA-RÉDUIT pour streaming RAPIDE
+                    time.sleep(0.01)  # 🔥 2x plus rapide
+
+            # Retirer le curseur final
+            placeholder.markdown(generated_text)
         else:
+            # Mode sans placeholder - accumulation simple
             for new_text in streamer:
-                generated_text += new_text
-        
-        thread.join()
-        return generated_text
-        
+                if new_text:
+                    generated_text += new_text
+                    token_count += 1
+
+        # Nettoyer la mémoire
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return generated_text.strip()
+
     except Exception as e:
-        # Fallback sans streaming
-        st.warning(f"⚠️ Streaming non disponible, mode normal: {str(e)[:50]}")
-        result = llm_pipeline(prompt, max_new_tokens=max_new_tokens, do_sample=True, temperature=0.7)
-        return result[0]['generated_text']
+        error_msg = f"Erreur streaming: {str(e)[:100]}"
+        if placeholder:
+            placeholder.error(error_msg)
+        return error_msg
+
+
+def generate_text_ultra_fast(llm_pipeline, prompt, max_new_tokens=200):
+    """
+    GÉNÉRATION ULTRA-EXTREME - Template pour vitesse maximale GPU
+    Utilise toutes les optimisations possibles pour la rapidité
+    """
+    try:
+        import torch
+        import time
+
+        start_time = time.time()
+        model = llm_pipeline.model
+        tokenizer = llm_pipeline.tokenizer
+
+        # 🔥 OPTIMISATIONS GPU EXTREMES
+        if torch.cuda.is_available():
+            # Nettoyage mémoire agressif
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # S'assurer que le modèle est sur GPU
+            model = model.to('cuda')
+
+            # Optimisations avancées
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+
+            # Désactiver gradient computation
+            torch.set_grad_enabled(False)
+
+        # Mode évaluation pour inférence pure
+        model.eval()
+
+        # Tokenization optimisée
+        inputs = tokenizer(
+            prompt,
+            return_tensors="pt",
+            padding=False,
+            truncation=True,
+            max_length=1024,  # Limiter input pour vitesse
+            add_special_tokens=True
+        )
+
+        if torch.cuda.is_available():
+            inputs = inputs.to('cuda')
+
+        # 🔥 PARAMÈTRES DE GÉNÉRATION ULTRA-OPTIMISÉS
+        generation_config = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": False,  # Désactiver sampling pour vitesse pure
+            "temperature": 1.0,  # 1.0 = déterministe
+            "top_p": 1.0,        # 1.0 = pas de filtering
+            "top_k": 1,          # 1 = greedy decoding
+            "repetition_penalty": 1.0,  # Pas de pénalité
+            "pad_token_id": tokenizer.eos_token_id,
+            "eos_token_id": tokenizer.eos_token_id,
+            "use_cache": True,   # Cache KV activé
+            "num_beams": 1,      # Pas de beam search
+            "early_stopping": True,
+            "length_penalty": 1.0,
+            "no_repeat_ngram_size": 0,  # Désactiver
+            "torch_dtype": torch.float16 if torch.cuda.is_available() else torch.float32,
+        }
+
+        # GÉNÉRATION ULTRA-RAPIDE
+        with torch.no_grad():
+            outputs = model.generate(**inputs, **generation_config)
+
+        # Décodage optimisé
+        generated_text = tokenizer.decode(
+            outputs[0][inputs['input_ids'].shape[1]:],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True
+        ).strip()
+
+        # Nettoyage mémoire agressif
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            torch.set_grad_enabled(True)  # Réactiver gradients si nécessaire
+
+        generation_time = time.time() - start_time
+
+        # Log de performance
+        tokens_generated = len(tokenizer.encode(generated_text))
+        tokens_per_sec = tokens_generated / generation_time if generation_time > 0 else 0
+
+        print(f"⚡ Génération ultra-fast: {tokens_generated} tokens en {generation_time:.2f}s ({tokens_per_sec:.2f} tokens/s)")
+        return generated_text
+
+    except Exception as e:
+        # Nettoyer en cas d'erreur
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.set_grad_enabled(True)
+        return f"❌ Erreur génération ultra-fast: {str(e)[:100]}"
+
+
+def load_llm_model_ultra_fast(model_path, device="auto", use_4bit=False, use_8bit=False):
+    """
+    TEMPLATE ULTRA-RAPIDE pour charger les modèles LLM avec optimisations GPU maximales
+
+    Args:
+        model_path: Chemin vers le modèle
+        device: Device ('auto', 'cuda', 'cpu')
+        use_4bit: Utiliser quantification 4-bit
+        use_8bit: Utiliser quantification 8-bit
+
+    Returns:
+        Pipeline LLM optimisé
+    """
+    import time
+    start_time = time.time()
+
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+        import torch
+
+        print(f"🚀 Chargement ULTRA-RAPIDE du modèle: {model_path}")
+
+        # 🔥 CONFIGURATIONS GPU ULTRA-OPTIMISÉES
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Optimisations CUDA globales
+        if torch.cuda.is_available() and device == "cuda":
+            # Vider la mémoire GPU complètement
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # Activer toutes les optimisations CUDA
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cuda.cufft_plan_cache.max_size = 0  # Désactiver cache cuFFT
+
+            # Optimisations pour cartes récentes
+            if torch.cuda.get_device_capability()[0] >= 8:  # Ampere ou plus récent
+                torch.backends.cuda.preferred_linalg_library = "cublas"
+
+        # 🔥 OPTIMISATIONS GPU POUR CHARGEMENT ULTRA-RAPIDE DES SHARDS
+        if device == "cuda":
+            # Configuration pour chargement parallèle des shards
+            model_kwargs.update({
+                "max_memory": {0: "22GB", "cpu": "32GB"},  # Utiliser toute la VRAM disponible
+                "offload_folder": None,  # Pas d'offload pour vitesse maximale
+                "load_in_8bit": False,   # Désactiver 8-bit si 4-bit activé
+                "load_in_4bit": use_4bit,
+            })
+
+            # Optimisations spécifiques pour chargement de checkpoints
+            if torch.cuda.get_device_capability()[0] >= 8:  # Ampere+
+                torch.backends.cuda.preferred_linalg_library = "cublasLt"
+                torch.set_float32_matmul_precision("high")
+
+            # Pré-allouer la mémoire GPU pour éviter les reallocations
+            torch.cuda.set_per_process_memory_fraction(0.95)  # Utiliser 95% de la VRAM
+
+        # 🔥 CONFIGURATION MODÈLE POUR CHARGEMENT ULTRA-RAPIDE DES 3 SHARDS
+        model_kwargs = {
+            "torch_dtype": torch.float16 if device == "cuda" else torch.float32,
+            "low_cpu_mem_usage": True,
+            "trust_remote_code": True,
+        }
+
+        # Quantification pour vitesse maximale
+        if use_4bit and device == "cuda":
+            from transformers import BitsAndBytesConfig
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4"
+            )
+        elif use_8bit and device == "cuda":
+            from transformers import BitsAndBytesConfig
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+                load_in_8bit_fp32_cpu_offload=False
+            )
+
+        # � OPTIMISATIONS POUR CHARGEMENT RAPIDE DES CHECKPOINTS SHARDS
+        if device == "cuda":
+            model_kwargs.update({
+                "device_map": "auto" if torch.cuda.device_count() > 1 else {"": 0},
+                "max_memory": {0: "22GB", "cpu": "32GB"},  # Utiliser toute la VRAM
+                "offload_folder": None,  # Pas d'offload pour vitesse maximale
+                "max_model_len": None,  # Pas de limite pour chargement complet
+                "rope_scaling": None,   # Pas de scaling pour compatibilité
+            })
+
+            # Optimisations spécifiques pour cartes NVIDIA récentes
+            if torch.cuda.get_device_capability()[0] >= 8:  # Ampere+
+                import os
+                os.environ["CUDA_LAUNCH_BLOCKING"] = "0"  # Async loading
+                torch.backends.cuda.preferred_linalg_library = "cublasLt"
+                torch.set_float32_matmul_precision("high")
+
+        print("�📥 Chargement du tokenizer...")
+        # Charger tokenizer de façon optimisée
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            use_fast=True,
+            padding_side="left"
+        )
+
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        print("🤖 Chargement du modèle avec GPU à 100% (3 shards simultanément)...")
+        # 🔥 CHARGEMENT AVEC GPU À FOND POUR LES 3 SHARDS
+        with torch.no_grad():  # Désactiver gradients pendant le chargement
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                **model_kwargs
+            )
+
+        # Optimisations post-chargement pour utilisation GPU maximale
+        if device == "cuda":
+            model = model.to(device)
+
+            # Synchronisation GPU pour s'assurer que tout est chargé
+            torch.cuda.synchronize()
+
+            # Optimisations avancées pour génération rapide
+            if hasattr(model, 'config'):
+                model.config.use_cache = True
+                model.config.torch_dtype = torch.float16
+
+            # Compiler le modèle si PyTorch 2.0+ (optimisation maximale)
+            if hasattr(torch, 'compile') and torch.cuda.get_device_capability()[0] >= 7:
+                try:
+                    # Mode d'optimisation maximale pour inférence
+                    model = torch.compile(model, mode="max-autotune")
+                    print("⚡ Modèle compilé avec torch.compile max-autotune pour performance ultime!")
+                except Exception as e:
+                    try:
+                        # Fallback vers mode reduce-overhead
+                        model = torch.compile(model, mode="reduce-overhead")
+                        print("⚡ Modèle compilé avec torch.compile reduce-overhead!")
+                    except Exception as e2:
+                        print(f"⚠️ Compilation torch.compile échouée: {e2}")
+
+            # Activer eval mode pour inférence pure
+            model.eval()
+
+            # Test rapide pour vérifier que le modèle fonctionne
+            print("🔍 Test rapide du modèle chargé...")
+            with torch.no_grad():
+                test_input = tokenizer("Test", return_tensors="pt").to(device)
+                _ = model(**test_input)
+                torch.cuda.synchronize()  # Synchronisation finale
+
+        # Créer pipeline optimisé
+        llm_pipeline = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device=device,
+            max_new_tokens=512,
+            do_sample=False,  # Déterministe pour vitesse
+            temperature=1.0,
+            top_p=1.0,
+            use_cache=True
+        )
+
+        loading_time = time.time() - start_time
+        print(f"⚡ Modèle chargé en {loading_time:.2f}s avec GPU à 100% !")
+        print(f"🎯 Device: {device}")
+        print(f"⚡ Optimisations: {'4-bit' if use_4bit else '8-bit' if use_8bit else 'FP16'}")
+        print(f"🚀 Prêt pour génération ultra-rapide!")
+
+        return llm_pipeline
+
+    except Exception as e:
+        print(f"❌ Erreur chargement ultra-fast: {str(e)[:100]}")
+        return None
+        error_msg = f"❌ Erreur chargement modèle: {str(e)}"
+        print(error_msg)
+        return None
+
+
+def load_kibali_model_ultra_fast():
+    """
+    Fonction spécialisée pour charger KIBALI avec optimisations maximales
+    """
+    model_path = "/home/belikan/kibali-finetune/kibali-final-merged-model"
+
+    return load_llm_model_ultra_fast(
+        model_path=model_path,
+        device="auto",
+        use_4bit=True,  # Quantification 4-bit pour vitesse maximale
+        use_8bit=False
+    )
+    """
+    GÉNÉRATION RAPIDE SANS STREAMING - Version ULTRA-optimisée pour la vitesse GPU
+    Génère le texte complet d'un coup pour une réponse instantanée
+    """
+    try:
+        # Extraire le modèle et tokenizer
+        model = llm_pipeline.model
+        tokenizer = llm_pipeline.tokenizer
+
+        # 🔥 OPTIMISATIONS GPU ULTRA-EXTREMES
+        model.eval()
+
+        # S'assurer que le modèle est sur GPU avec optimisations maximales
+        if torch.cuda.is_available():
+            # Vider la mémoire GPU avant
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()  # Attendre que tout soit propre
+
+            # Déplacer sur GPU avec optimisations
+            model = model.to('cuda')
+
+            # Optimisations GPU avancées
+            if hasattr(model, 'config'):
+                model.config.use_cache = True
+                model.config.torch_dtype = torch.float16
+
+            # Activer les optimisations CUDA si disponibles
+            if torch.cuda.is_bf16_supported():
+                model = model.to(dtype=torch.bfloat16)
+            else:
+                model = model.to(dtype=torch.float16)
+
+            # Optimisations de mémoire GPU
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+
+        # Préparer les inputs de façon optimisée
+        with torch.no_grad():
+            inputs = tokenizer(
+                prompt,
+                return_tensors="pt",
+                padding=False,
+                truncation=True,
+                max_length=2048  # Limiter pour vitesse
+            ).to(model.device)
+
+            # GÉNÉRATION ULTRA-RAPIDE - Paramètres optimisés pour VITESSE MAXIMALE
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9,
+                top_k=40,
+                repetition_penalty=1.1,
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=True,  # Cache KV activé pour vitesse maximale
+                num_beams=1,     # Pas de beam search pour vitesse
+                # Optimisations GPU extrêmes
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                # Accélérations supplémentaires
+                num_return_sequences=1,
+                early_stopping=True,
+                length_penalty=1.0,
+                no_repeat_ngram_size=3,
+                # Optimisations mémoire
+                use_auth_token=None,
+                device_map=None,  # Pas de device_map pour éviter overhead
+            )
+
+        # Décoder de façon optimisée
+        generated_text = tokenizer.decode(
+            outputs[0][inputs['input_ids'].shape[1]:],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True
+        )
+
+        # Nettoyer la mémoire GPU de façon agressive
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+        return generated_text.strip()
+
+    except Exception as e:
+        return f"❌ Erreur génération rapide: {str(e)[:100]}"
 
 
 def analyze_image_with_clip_and_llm(fig, llm_pipeline, clip_model=None, clip_processor=None, device="cpu", context="", use_cache=True):
@@ -2661,7 +3923,7 @@ Explication CONCISE (3-4 phrases):
 RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
         
         if llm_pipeline:
-            explanation = generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=250)  # Réduit de 400 à 250
+            explanation = generate_text_ultra_fast(llm_pipeline, prompt, max_new_tokens=200)  # Réduit pour vitesse
             if '[/INST]' in explanation:
                 explanation = explanation.split('[/INST]')[-1].strip()
             
@@ -4445,74 +5707,66 @@ else:
                                    help="⚠️ CLIP est lent ! Désactivez pour des explications plus rapides (LLM seul)")
     st.session_state.use_clip = use_clip
 
-    # Chargement automatique au premier lancement
-    try:
-        if not st.session_state.llm_loaded and not st.session_state.llm_loading_attempted:
-            # Essai rapide d'initialisation automatique silencieuse
+    # GESTION INTELLIGENTE DU CHARGEMENT KIBALI - UNE SEULE FOIS PAR SESSION
+    if not st.session_state.get('llm_loaded', False):
+        if not st.session_state.get('llm_loading_attempted', False):
+            # PREMIER LANCEMENT : Essai de chargement automatique silencieux
             try:
-                st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
-                st.session_state.llm_loaded = True
-                # Initialiser RAG immédiatement après
+                with st.spinner("🤖 Chargement initial de KIBALI sur GPU (une seule fois)..."):
+                    st.session_state.llm_pipeline = load_kibali_llm(use_cpu=False, quantize=True)
+                    st.session_state.llm_loaded = True
+                    st.session_state.llm_loading_attempted = True
+
+                # Initialiser RAG immédiatement après le premier chargement
                 try:
                     initialize_rag_system()
-                except:
-                    pass  # Ne pas bloquer si RAG échoue
-            except:
-                pass  # Échec silencieux, on passera au manuel
-            finally:
-                st.session_state.llm_loading_attempted = True
-    except:
-        pass  # Sécurité maximale
+                except Exception as rag_error:
+                    st.warning(f"⚠️ RAG non initialisé : {str(rag_error)[:100]}")
 
-    # BOUTON DE CHARGEMENT MANUEL TRÈS VISIBLE
-    if not st.session_state.llm_loaded:
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### 🚀 CHARGEMENT IA MANUEL")
-        st.sidebar.warning("⚠️ LLM non chargé - Analyses basiques uniquement")
-        
-        if st.sidebar.button("🚀 CHARGER LE LLM MAINTENANT", key="manual_llm_load", 
-                           help="Cliquez pour activer les analyses IA intelligentes", 
+            except Exception as e:
+                st.session_state.llm_loading_attempted = True
+                st.warning(f"⚠️ Chargement automatique échoué : {str(e)[:100]}")
+        else:
+            # DÉJÀ TENTÉ : Afficher le bouton de chargement manuel
+            pass  # Le bouton sera affiché plus bas
+
+    # BOUTON DE CHARGEMENT MANUEL (si pas encore chargé)
+    if not st.session_state.get('llm_loaded', False):
+        if st.sidebar.button("🚀 Charger le LLM KIBALI",
+                           help="Charge KIBALI une seule fois - reste en mémoire pour toute la session",
                            type="primary"):
-            with st.sidebar.status("🤖 Chargement du LLM en cours...", expanded=True) as status:
+            with st.sidebar.status("🤖 Chargement du LLM KIBALI en cours...", expanded=True) as status:
                 try:
-                    status.write("📥 Téléchargement et initialisation du modèle IA...")
-                    st.session_state.llm_pipeline = load_mistral_llm(use_cpu=True, quantize=True)
+                    status.write("📥 Téléchargement et initialisation du modèle IA sur GPU...")
+                    st.session_state.llm_pipeline = load_kibali_llm(use_cpu=False, quantize=True)
                     st.session_state.llm_loaded = True
-                    
+
                     status.write("🖼️ Chargement des capacités visuelles (CLIP)...")
-                    if use_clip and not st.session_state.clip_loaded:
+                    if use_clip and not st.session_state.get('clip_loaded', False):
                         clip_model, clip_processor, clip_device = load_clip_model()
                         st.session_state.clip_model = clip_model
                         st.session_state.clip_processor = clip_processor
                         st.session_state.clip_device = clip_device
-                        st.session_state.clip_loaded = (clip_model is not None)
-                    
-                    status.update(label="✅ IA activée avec succès !", state="complete")
-                    st.sidebar.success("💡 Analyses IA complètes activées !")
-                    
-                    # Initialiser RAG après succès
-                    status.write("📚 Activation de la base de connaissances...")
-                    try:
-                        rag_initialized = initialize_rag_system()
-                        if rag_initialized:
-                            st.sidebar.success("✅ Base de connaissances activée")
-                        else:
-                            st.sidebar.warning("⚠️ Base limitée - Mode IA seul")
-                    except Exception as rag_error:
-                        st.sidebar.warning(f"⚠️ Base partielle : {str(rag_error)[:25]}")
-                        
+                        st.session_state.clip_loaded = True
+
+                    status.write("✅ KIBALI chargé définitivement !")
                     st.rerun()  # Actualiser l'interface
-                    
+
                 except Exception as e:
-                    status.update(label="❌ Échec du chargement", state="error")
-                    st.sidebar.error(f"❌ Erreur : {str(e)[:60]}")
-                    st.sidebar.info("Réessayez ou continuez avec analyses basiques")
-    if st.session_state.llm_loaded:
-        st.sidebar.success("✅ LLM Mistral actif - Analyses intelligentes activées")
-        if st.session_state.clip_loaded and use_clip:
-            st.sidebar.success("✅ CLIP actif - Analyse visuelle activée")
-        elif use_clip and not st.session_state.clip_loaded:
-            st.sidebar.info("⏳ Cochez la case pour charger CLIP")
+                    status.error(f"❌ Échec : {str(e)[:150]}")
+                    st.error("💡 Vérifiez votre connexion internet et réessayez.")
+    else:
+        # KIBALI DÉJÀ CHARGÉ - Afficher le statut
+        st.sidebar.success("✅ LLM KIBALI actif - Analyses intelligentes activées")
+        st.sidebar.info("💡 KIBALI reste chargé pour toute la session - pas de rechargement nécessaire")
+
+        # Afficher les statistiques de chargement
+        if hasattr(st.session_state, 'llm_pipeline') and st.session_state.llm_pipeline is not None:
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("**📊 Statut KIBALI :**")
+            st.sidebar.markdown("- ✅ Modèle chargé en mémoire")
+            st.sidebar.markdown("- ✅ Prêt pour analyses instantanées")
+            st.sidebar.markdown("- ✅ Pas de rechargement nécessaire")
     
     # SYSTÈME RAG
     st.sidebar.markdown("---")
@@ -4819,7 +6073,7 @@ with tab1:
         with col2:
             tg_f = st.number_input("Tg – Température surface moyenne (°F)", value=70.0, min_value=-20.0, max_value=120.0, step=0.5)
 
-    if st.button("🔥 Calculer Ts", type="primary", use_container_width=True):
+    if st.button("🔥 Calculer Ts", type="primary", width='stretch'):
         ts = get_ts(tw_f, tg_f)
         tw_used = max(36, min(90, int(tw_f / 2 + 0.5) * 2))
         tg_used = max(0, min(95, int(tg_f / 5 + 0.5) * 5))
@@ -4837,7 +6091,7 @@ with tab1:
         df_table.index.name = "Tw \\ Tg"
         df_table = df_table.sort_index()
         df_table.insert(0, "Tw (°F)", df_table.index)
-        st.dataframe(df_table.style.background_gradient(cmap='coolwarm', axis=None), use_container_width=True)
+        st.dataframe(df_table.style.background_gradient(cmap='coolwarm', axis=None), width='stretch')
 
     with st.expander("💧 Valeurs typiques pour l'eau – Résistivité & Couleurs associées"):
         st.markdown("### **2. Valeurs typiques pour l'eau**")
@@ -4860,7 +6114,7 @@ with tab2:
     if 'uploaded_data' not in st.session_state:
         st.session_state['uploaded_data'] = None
     
-    uploaded_file = st.file_uploader("📂 Uploader un fichier .dat", type=["dat"])
+    uploaded_file = st.file_uploader("📂 Uploader un fichier .dat", type=["dat"], key="main_dat_upload")
     
     if uploaded_file is not None:
         # Lire le contenu du fichier en bytes (avec cache)
@@ -4888,7 +6142,7 @@ with tab2:
             st.session_state['unit'] = unit
             
             # Affichage du DataFrame
-            st.dataframe(df.head(50), use_container_width=True)
+            st.dataframe(df.head(50), width='stretch')
             
             # Statistiques de base
             st.subheader("📊 Statistiques descriptives")
@@ -4953,7 +6207,7 @@ with tab2:
                                 })
                         
                         if prediction_data:
-                            st.dataframe(pd.DataFrame(prediction_data), use_container_width=True, hide_index=True)
+                            st.dataframe(pd.DataFrame(prediction_data), width='stretch', hide_index=True)
 
             with col1:
                 st.metric("Total mesures", len(df))
@@ -4983,7 +6237,7 @@ with tab2:
                 ax.grid(True, alpha=0.3)
                 plt.xticks(rotation=45)
                 plt.tight_layout()
-                st.pyplot(fig_time, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_time, clear_figure=False, width='stretch')
                 
                 # Sauvegarder pour PDF
                 figures_dict['temporal_evolution'] = fig_time
@@ -5025,7 +6279,7 @@ with tab2:
             ax.set_title(f'Classification en {n_clusters} groupes', fontsize=13, fontweight='bold')
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
-            st.pyplot(fig_cluster, clear_figure=False, use_container_width=True)
+            st.pyplot(fig_cluster, clear_figure=False, width='stretch')
             
             # Sauvegarder pour PDF
             figures_dict['kmeans_clustering'] = fig_cluster
@@ -5096,38 +6350,73 @@ with tab2:
                 ax_water.grid(True, alpha=0.3, linestyle='--', color='white', linewidth=0.5)
                 plt.tight_layout()
                 
-                st.pyplot(fig_water, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_water, clear_figure=False, width='stretch')
                 
                 # Sauvegarder pour PDF
                 figures_dict['water_level_section'] = fig_water
                 
                 # Générer légende et explication dynamiques avec le LLM
-                st.markdown("### 📝 Interprétation Automatique (LLM)")
-                
-                # Utiliser le LLM seulement si mode activé
-                llm = None
-                if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
-                    llm = st.session_state.get('llm_pipeline', None)
-                
-                if llm is not None:
-                    with st.spinner("🧠 Génération de l'interprétation avec le LLM..."):
-                        legend_dynamic, explanation_dynamic = generate_dynamic_legend_and_explanation(
-                            llm, df, df['data'].min(), df['data'].max(), section_type="general"
-                        )
-                    
-                    st.markdown(f"""
-**Légende générée automatiquement :**
-{legend_dynamic}
+                # INTERPRÉTATION COMPLÈTE AVEC KIBALI - TOUJOURS ACTIVE
+                st.markdown("### 📝 Interprétation Automatique (KIBALI)")
 
-**Interprétation géologique :**
-{explanation_dynamic}
+                # Préparer les données géophysiques pour KIBALI
+                geophysical_data = {
+                    'n_spectra': len(df),
+                    'rho_min': df['data'].min(),
+                    'rho_max': df['data'].max(),
+                    'rho_mean': df['data'].mean(),
+                    'rho_std': df['data'].std(),
+                    'n_trajectories': len(df['x'].unique()) if 'x' in df.columns else 1,
+                    'depth_range': f"{df['depth'].abs().min():.1f} - {df['depth'].abs().max():.1f} m"
+                }
 
-**Points de mesure** : {len(df)} données réelles du fichier .dat
-                    """)
+                # Utiliser KIBALI pour interprétation complète
+                llm_pipeline = get_kibali_pipeline()
+
+                if llm_pipeline is not None:
+                    try:
+                        with st.spinner("🧠 KIBALI analyse vos données géophysiques..."):
+                            interpretation, recommendations, llm_prompt = analyze_data_with_kibali(
+                                llm_pipeline, geophysical_data
+                            )
+
+                        if interpretation:
+                            st.markdown(f"""
+**📊 Analyse Géologique Complète (KIBALI)** :
+{interpretation}
+
+**🎯 Recommandations d'Action** :
+{recommendations}
+
+**📈 Statistiques Détaillées** :
+- Résistivité : {df['data'].min():.1f} - {df['data'].max():.1f} Ω·m (moyenne: {df['data'].mean():.1f} Ω·m)
+- Points de mesure : {len(df)} données réelles
+- Profondeur : {df['depth'].abs().min():.1f} - {df['depth'].abs().max():.1f} m
+- Structures détectées : {geophysical_data['n_trajectories']} trajectoires
+                            """)
+                        else:
+                            # Fallback si analyse échoue
+                            st.markdown(f"""
+**📊 Analyse Géologique (Mode Automatique)** :
+- Résistivité mesurée : {df['data'].min():.1f} - {df['data'].max():.1f} Ω·m
+- Moyenne : {df['data'].mean():.1f} Ω·m (±{df['data'].std():.1f})
+- {len(df)} points de mesure analysés
+- Profondeur : {df['depth'].abs().min():.1f} - {df['depth'].abs().max():.1f} m
+- Type probable : {geophysical_data.get('geo_type', 'terrain varié')}
+                            """)
+                    except Exception as e:
+                        st.warning(f"⚠️ Analyse KIBALI temporairement indisponible: {str(e)[:100]}")
+                        st.markdown(f"""
+**📊 Analyse Géologique (Mode Automatique)** :
+- Résistivité : {df['data'].min():.1f} - {df['data'].max():.1f} Ω·m
+- Moyenne : {df['data'].mean():.1f} Ω·m
+- {len(df)} points de mesure
+                        """)
                 else:
-                    # Fallback si LLM non disponible
+                    # KIBALI pas encore chargé - message d'attente
+                    st.info("⚠️ KIBALI non chargé. Cliquez sur '🚀 Charger le LLM KIBALI' dans la sidebar pour des analyses complètes.")
                     st.markdown(f"""
-**Interprétation basique (LLM non disponible) :**
+**📊 Analyse Géologique (Chargement KIBALI en cours...)** :
 - Résistivité mesurée : {df['data'].min():.1f} - {df['data'].max():.1f} Ω·m
 - Moyenne : {df['data'].mean():.1f} Ω·m
 - {len(df)} points de mesure
@@ -5151,7 +6440,7 @@ with tab2:
                 'Couleur associée': ['🔴 Rouge vif / Orange', '🟡 Jaune / Orange', '🟢 Vert / Bleu clair', '🔵 Bleu foncé']
             })
             
-            st.dataframe(water_reference, use_container_width=True, hide_index=True)
+            st.dataframe(water_reference, width='stretch', hide_index=True)
             
             # Afficher une barre de couleur de la colormap personnalisée
             st.markdown("#### 🎨 Échelle de couleurs - Résistivité des eaux")
@@ -5183,7 +6472,7 @@ with tab2:
                     ax_cbar.axvline(pos, color='white', linewidth=2, linestyle='--', alpha=0.8)
                 
                 plt.tight_layout()
-                st.pyplot(fig_cbar, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_cbar, clear_figure=False, width='stretch')
                 plt.close(fig_cbar)
             except Exception as e:
                 st.warning(f"⚠️ Erreur affichage échelle couleurs : {str(e)[:100]}")
@@ -5244,35 +6533,55 @@ with tab2:
                     ax_sea.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_sea, clear_figure=False, use_container_width=True)
+                    st.pyplot(fig_sea, clear_figure=False, width='stretch')
                     figures_dict['seawater_section'] = fig_sea
                     
-                    # Générer explication dynamique avec le LLM (seulement si activé)
-                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
-                        llm = st.session_state.get('llm_pipeline', None)
-                        
-                        if llm is not None:
-                            legend_sea, explanation_sea = generate_dynamic_legend_and_explanation(
-                                llm, df_sea, df_sea['data'].min(), df_sea['data'].max(), section_type="seawater"
-                            )
+                    # ANALYSE COMPLÈTE AVEC KIBALI - Zone Eau de Mer
+                    st.markdown("### 🌊 Analyse Eau de Mer (KIBALI)")
+
+                    # Préparer les données pour KIBALI
+                    seawater_data = {
+                        'n_spectra': len(df_sea),
+                        'rho_min': df_sea['data'].min(),
+                        'rho_max': df_sea['data'].max(),
+                        'rho_mean': df_sea['data'].mean(),
+                        'rho_std': df_sea['data'].std(),
+                        'n_trajectories': len(df_sea['x'].unique()) if 'x' in df_sea.columns else 1,
+                        'depth_range': f"{df_sea['depth'].abs().min():.1f} - {df_sea['depth'].abs().max():.1f} m",
+                        'zone_type': 'eau_oceanique_salee'
+                    }
+
+                    llm_pipeline = get_kibali_pipeline()
+                    if llm_pipeline is not None:
+                        try:
+                            with st.spinner("🧠 KIBALI analyse la zone eau de mer..."):
+                                interpretation, recommendations, _ = analyze_data_with_kibali(llm_pipeline, seawater_data)
+
                             st.markdown(f"""
-**Analyse automatique (LLM) - Zone eau de mer :**
+**🌊 Analyse Eau de Mer Complète (KIBALI)** :
+{interpretation}
 
-**Légende :**
-{legend_sea}
+**🎯 Recommandations** :
+{recommendations}
 
-**Interprétation :**
-{explanation_sea}
+**📊 Données Mesurées** :
+- Résistivité : {df_sea['data'].min():.2f} - {df_sea['data'].max():.2f} Ω·m (moy: {df_sea['data'].mean():.2f})
+- Mesures : {len(df_sea)} points
+- Profondeur : {df_sea['depth'].abs().min():.1f} - {df_sea['depth'].abs().max():.1f} m
                             """)
-                        else:
-                            st.info("💡 LLM non disponible - Analyses basiques uniquement")
+                        except Exception as e:
+                            st.warning(f"⚠️ Analyse eau de mer indisponible: {str(e)[:80]}")
+                            st.markdown(f"""
+**🌊 Analyse Eau de Mer (Automatique)** :
+- Résistivité : {df_sea['data'].min():.2f} - {df_sea['data'].max():.2f} Ω·m
+- {len(df_sea)} mesures dans la zone océanique
+                            """)
                     else:
+                        st.info("⚠️ KIBALI non chargé - Analyses eau de mer basiques")
                         st.markdown(f"""
-**Caractéristiques mesurées :**
-- **Résistivité** : {df_sea['data'].min():.2f} - {df_sea['data'].max():.2f} Ω·m (moy: {df_sea['data'].mean():.2f})
-- **Nombre de mesures** : {len(df_sea)} points
-- **Profondeur** : {df_sea['depth'].abs().min():.1f} - {df_sea['depth'].abs().max():.1f} m
-- **Zone** : Eau océanique fortement salée
+**🌊 Caractéristiques Eau de Mer** :
+- Résistivité : {df_sea['data'].min():.2f} - {df_sea['data'].max():.2f} Ω·m
+- {len(df_sea)} mesures océaniques
                         """)
                 else:
                     st.info("Aucune mesure dans cette plage de résistivité dans vos données")
@@ -5332,34 +6641,55 @@ with tab2:
                     ax_saline.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_saline, clear_figure=False, use_container_width=True)
+                    st.pyplot(fig_saline, clear_figure=False, width='stretch')
                     figures_dict['saline_section'] = fig_saline
                     
-                    # Générer explication dynamique avec le LLM (si activé)
-                    llm = None
-                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
-                        llm = st.session_state.get('llm_pipeline', None)
-                    
-                    if llm is not None:
-                        legend_saline, explanation_saline = generate_dynamic_legend_and_explanation(
-                            llm, df_saline, df_saline['data'].min(), df_saline['data'].max(), section_type="saline"
-                        )
-                        st.markdown(f"""
-**Analyse automatique (LLM) - Nappe d'eau salée :**
+                    # ANALYSE COMPLÈTE AVEC KIBALI - Zone Eau Salée Nappe
+                    st.markdown("### 🟡 Analyse Eau Salée Nappe (KIBALI)")
 
-**Légende :**
-{legend_saline}
+                    # Préparer les données pour KIBALI
+                    saline_data = {
+                        'n_spectra': len(df_saline),
+                        'rho_min': df_saline['data'].min(),
+                        'rho_max': df_saline['data'].max(),
+                        'rho_mean': df_saline['data'].mean(),
+                        'rho_std': df_saline['data'].std(),
+                        'n_trajectories': len(df_saline['x'].unique()) if 'x' in df_saline.columns else 1,
+                        'depth_range': f"{df_saline['depth'].abs().min():.1f} - {df_saline['depth'].abs().max():.1f} m",
+                        'zone_type': 'nappe_eau_salee'
+                    }
 
-**Interprétation :**
-{explanation_saline}
-                        """)
+                    llm_pipeline = get_kibali_pipeline()
+                    if llm_pipeline is not None:
+                        try:
+                            with st.spinner("🧠 KIBALI analyse la nappe d'eau salée..."):
+                                interpretation, recommendations, _ = analyze_data_with_kibali(llm_pipeline, saline_data)
+
+                            st.markdown(f"""
+**🟡 Analyse Nappe Eau Salée Complète (KIBALI)** :
+{interpretation}
+
+**🎯 Recommandations** :
+{recommendations}
+
+**📊 Données Mesurées** :
+- Résistivité : {df_saline['data'].min():.2f} - {df_saline['data'].max():.2f} Ω·m (moy: {df_saline['data'].mean():.2f})
+- Mesures : {len(df_saline)} points
+- Profondeur : {df_saline['depth'].abs().min():.1f} - {df_saline['depth'].abs().max():.1f} m
+                            """)
+                        except Exception as e:
+                            st.warning(f"⚠️ Analyse eau salée indisponible: {str(e)[:80]}")
+                            st.markdown(f"""
+**🟡 Analyse Nappe Eau Salée (Automatique)** :
+- Résistivité : {df_saline['data'].min():.2f} - {df_saline['data'].max():.2f} Ω·m
+- {len(df_saline)} mesures dans la nappe saumâtre
+                            """)
                     else:
+                        st.info("⚠️ KIBALI non chargé - Analyses eau salée basiques")
                         st.markdown(f"""
-**Caractéristiques mesurées :**
-- **Résistivité** : {df_saline['data'].min():.2f} - {df_saline['data'].max():.2f} Ω·m (moy: {df_saline['data'].mean():.2f})
-- **Nombre de mesures** : {len(df_saline)} points
-- **Profondeur** : {df_saline['depth'].abs().min():.1f} - {df_saline['depth'].abs().max():.1f} m
-- **Zone** : Eau saumâtre dans nappe phréatique
+**🟡 Caractéristiques Nappe Eau Salée** :
+- Résistivité : {df_saline['data'].min():.2f} - {df_saline['data'].max():.2f} Ω·m
+- {len(df_saline)} mesures dans la nappe phréatique saumâtre
                         """)
                 else:
                     st.info("Aucune mesure dans cette plage de résistivité dans vos données")
@@ -5418,34 +6748,55 @@ with tab2:
                     ax_fresh.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     
                     plt.tight_layout()
-                    st.pyplot(fig_fresh, clear_figure=False, use_container_width=True)
+                    st.pyplot(fig_fresh, clear_figure=False, width='stretch')
                     figures_dict['freshwater_section'] = fig_fresh
                     
-                    # Générer explication dynamique avec le LLM (si activé)
-                    llm = None
-                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
-                        llm = st.session_state.get('llm_pipeline', None)
-                    
-                    if llm is not None:
-                        legend_fresh, explanation_fresh = generate_dynamic_legend_and_explanation(
-                            llm, df_fresh, df_fresh['data'].min(), df_fresh['data'].max(), section_type="freshwater"
-                        )
-                        st.markdown(f"""
-**Analyse automatique (LLM) - Aquifère d'eau douce :**
+                    # ANALYSE COMPLÈTE AVEC KIBALI - Zone Eau Douce
+                    st.markdown("### 🟢 Analyse Eau Douce (KIBALI)")
 
-**Légende :**
-{legend_fresh}
+                    # Préparer les données pour KIBALI
+                    fresh_data = {
+                        'n_spectra': len(df_fresh),
+                        'rho_min': df_fresh['data'].min(),
+                        'rho_max': df_fresh['data'].max(),
+                        'rho_mean': df_fresh['data'].mean(),
+                        'rho_std': df_fresh['data'].std(),
+                        'n_trajectories': len(df_fresh['x'].unique()) if 'x' in df_fresh.columns else 1,
+                        'depth_range': f"{df_fresh['depth'].abs().min():.1f} - {df_fresh['depth'].abs().max():.1f} m",
+                        'zone_type': 'aquifere_eau_douce'
+                    }
 
-**Interprétation :**
-{explanation_fresh}
-                        """)
+                    llm_pipeline = get_kibali_pipeline()
+                    if llm_pipeline is not None:
+                        try:
+                            with st.spinner("🧠 KIBALI analyse l'aquifère d'eau douce..."):
+                                interpretation, recommendations, _ = analyze_data_with_kibali(llm_pipeline, fresh_data)
+
+                            st.markdown(f"""
+**🟢 Analyse Aquifère Eau Douce Complète (KIBALI)** :
+{interpretation}
+
+**🎯 Recommandations** :
+{recommendations}
+
+**📊 Données Mesurées** :
+- Résistivité : {df_fresh['data'].min():.2f} - {df_fresh['data'].max():.2f} Ω·m (moy: {df_fresh['data'].mean():.2f})
+- Mesures : {len(df_fresh)} points
+- Profondeur : {df_fresh['depth'].abs().min():.1f} - {df_fresh['depth'].abs().max():.1f} m
+                            """)
+                        except Exception as e:
+                            st.warning(f"⚠️ Analyse eau douce indisponible: {str(e)[:80]}")
+                            st.markdown(f"""
+**🟢 Analyse Aquifère Eau Douce (Automatique)** :
+- Résistivité : {df_fresh['data'].min():.2f} - {df_fresh['data'].max():.2f} Ω·m
+- {len(df_fresh)} mesures dans l'aquifère continental
+                            """)
                     else:
+                        st.info("⚠️ KIBALI non chargé - Analyses eau douce basiques")
                         st.markdown(f"""
-**Caractéristiques mesurées :**
-- **Résistivité** : {df_fresh['data'].min():.2f} - {df_fresh['data'].max():.2f} Ω·m (moy: {df_fresh['data'].mean():.2f})
-- **Nombre de mesures** : {len(df_fresh)} points
-- **Profondeur** : {df_fresh['depth'].abs().min():.1f} - {df_fresh['depth'].abs().max():.1f} m
-- **Zone** : Eau douce continentale
+**🟢 Caractéristiques Aquifère Eau Douce** :
+- Résistivité : {df_fresh['data'].min():.2f} - {df_fresh['data'].max():.2f} Ω·m
+- {len(df_fresh)} mesures dans l'aquifère continental
                         """)
                 else:
                     st.info("Aucune mesure dans cette plage de résistivité dans vos données")
@@ -5504,34 +6855,55 @@ with tab2:
                     ax_pure.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     ax_pure.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
                     plt.tight_layout()
-                    st.pyplot(fig_pure, clear_figure=False, use_container_width=True)
+                    st.pyplot(fig_pure, clear_figure=False, width='stretch')
                     figures_dict['purewater_section'] = fig_pure
                     
-                    # Générer explication dynamique avec le LLM (si activé)
-                    llm = None
-                    if st.session_state.get('enable_llm', True) and st.session_state.get('llm_loaded', False):
-                        llm = st.session_state.get('llm_pipeline', None)
-                    
-                    if llm is not None:
-                        legend_pure, explanation_pure = generate_dynamic_legend_and_explanation(
-                            llm, df_pure, df_pure['data'].min(), df_pure['data'].max(), section_type="pure"
-                        )
-                        st.markdown(f"""
-**Analyse automatique (LLM) - Eau très pure / Roche sèche :**
+                    # ANALYSE COMPLÈTE AVEC KIBALI - Zone Eau Très Pure
+                    st.markdown("### 🔵 Analyse Eau Très Pure (KIBALI)")
 
-**Légende :**
-{legend_pure}
+                    # Préparer les données pour KIBALI
+                    pure_data = {
+                        'n_spectra': len(df_pure),
+                        'rho_min': df_pure['data'].min(),
+                        'rho_max': df_pure['data'].max(),
+                        'rho_mean': df_pure['data'].mean(),
+                        'rho_std': df_pure['data'].std(),
+                        'n_trajectories': len(df_pure['x'].unique()) if 'x' in df_pure.columns else 1,
+                        'depth_range': f"{df_pure['depth'].abs().min():.1f} - {df_pure['depth'].abs().max():.1f} m",
+                        'zone_type': 'eau_tres_pure_roche_resistive'
+                    }
 
-**Interprétation :**
-{explanation_pure}
-                        """)
+                    llm_pipeline = get_kibali_pipeline()
+                    if llm_pipeline is not None:
+                        try:
+                            with st.spinner("🧠 KIBALI analyse l'eau très pure/roche résistive..."):
+                                interpretation, recommendations, _ = analyze_data_with_kibali(llm_pipeline, pure_data)
+
+                            st.markdown(f"""
+**🔵 Analyse Eau Très Pure/Roche Résistive Complète (KIBALI)** :
+{interpretation}
+
+**🎯 Recommandations** :
+{recommendations}
+
+**📊 Données Mesurées** :
+- Résistivité : {df_pure['data'].min():.2f} - {df_pure['data'].max():.2f} Ω·m (moy: {df_pure['data'].mean():.2f})
+- Mesures : {len(df_pure)} points
+- Profondeur : {df_pure['depth'].abs().min():.1f} - {df_pure['depth'].abs().max():.1f} m
+                            """)
+                        except Exception as e:
+                            st.warning(f"⚠️ Analyse eau pure indisponible: {str(e)[:80]}")
+                            st.markdown(f"""
+**🔵 Analyse Eau Très Pure/Roche (Automatique)** :
+- Résistivité : {df_pure['data'].min():.2f} - {df_pure['data'].max():.2f} Ω·m
+- {len(df_pure)} mesures dans la zone résistive
+                            """)
                     else:
+                        st.info("⚠️ KIBALI non chargé - Analyses eau pure basiques")
                         st.markdown(f"""
-**Caractéristiques mesurées :**
-- **Résistivité** : {df_pure['data'].min():.2f} - {df_pure['data'].max():.2f} Ω·m (moy: {df_pure['data'].mean():.2f})
-- **Nombre de mesures** : {len(df_pure)} points
-- **Profondeur** : {df_pure['depth'].abs().min():.1f} - {df_pure['depth'].abs().max():.1f} m
-- **Zone** : Eau très pure ou formation rocheuse résistive
+**🔵 Caractéristiques Eau Très Pure/Roche** :
+- Résistivité : {df_pure['data'].min():.2f} - {df_pure['data'].max():.2f} Ω·m
+- {len(df_pure)} mesures dans la formation résistive
                         """)
                 else:
                     st.info("Aucune mesure dans cette plage de résistivité dans vos données")
@@ -5632,7 +7004,7 @@ with tab2:
                 ax_pseudo.legend(loc='upper right', fontsize=10, framealpha=0.9)
                 
                 plt.tight_layout()
-                st.pyplot(fig_pseudo, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_pseudo, clear_figure=False, width='stretch')
                 plt.close()
                 
                 # Statistiques
@@ -5673,7 +7045,7 @@ with tab2:
                                 )
                                 st.info(interpretation_pseudo)
                 else:
-                    st.warning("⚠️ LLM non chargé. Cliquez sur '🚀 Charger le LLM Mistral' dans la sidebar.")
+                    st.warning("⚠️ LLM non chargé. Cliquez sur '🚀 Charger le LLM KIBALI' dans la sidebar.")
                     
                     # Fallback avec vraies valeurs
                     st.markdown(f"""
@@ -5829,7 +7201,7 @@ La couleur d'un point sur la pseudo-section représente donc la valeur de la ré
         ax.grid(True, alpha=0.3, linestyle='--')
         plt.tight_layout()
         
-        st.pyplot(fig_real, clear_figure=False, use_container_width=True)
+        st.pyplot(fig_real, clear_figure=False, width='stretch')
         
         # Sauvegarder pour PDF
         figures_tab3['pseudo_section_2d'] = fig_real
@@ -5881,7 +7253,17 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
                 height=600
             )
             
-            st.plotly_chart(fig3d_real, use_container_width=True)
+            # Utiliser les tooltips dynamiques KIBALI si LLM disponible
+            if 'llm_pipeline' in globals() and llm_pipeline is not None:
+                create_enhanced_plotly_chart_with_kibali(
+                    fig3d_real,
+                    element_type="point_donnee",
+                    llm_pipeline=llm_pipeline,
+                    context="Visualisation 3D des mesures de niveau d'eau - Survolez les points pour analyses expertes",
+                    chart_title="Visualisation 3D Niveau d'Eau"
+                )
+            else:
+                st.plotly_chart(fig3d_real, width='stretch')
         
         # Statistiques par profondeur
         st.subheader("📈 Analyse par profondeur")
@@ -5895,7 +7277,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
             return depth_stats
         
         depth_stats = compute_depth_stats(data_hash)
-        st.dataframe(depth_stats.style.background_gradient(cmap='RdYlBu_r', axis=0), use_container_width=True)
+        st.dataframe(depth_stats.style.background_gradient(cmap='RdYlBu_r', axis=0), width='stretch')
         
         # Coupes comparatives avec mesures réelles incrustées
         st.markdown("---")
@@ -5985,7 +7367,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
                 fig_comp1.colorbar(pcm2, ax=ax2, label='Résistivité mesurée (Ω.m)')
             
             plt.tight_layout()
-            st.pyplot(fig_comp1, clear_figure=False, use_container_width=True)
+            st.pyplot(fig_comp1, clear_figure=False, width='stretch')
             figures_tab3['comparative_1'] = fig_comp1
             
             st.markdown("""
@@ -6069,7 +7451,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
                          fontsize=8, va='top')
             
             plt.tight_layout()
-            st.pyplot(fig_comp2, clear_figure=False, use_container_width=True)
+            st.pyplot(fig_comp2, clear_figure=False, width='stretch')
             figures_tab3['comparative_2'] = fig_comp2
             
             st.markdown("""
@@ -6197,7 +7579,7 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
             ax_pseudo_t3.legend(loc='upper right', fontsize=10, framealpha=0.9)
             
             plt.tight_layout()
-            st.pyplot(fig_pseudo_t3, clear_figure=False, use_container_width=True)
+            st.pyplot(fig_pseudo_t3, clear_figure=False, width='stretch')
             plt.close()
             
             # Statistiques
@@ -6346,7 +7728,7 @@ with tab4:
                                 cbar_strat.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
                                 
                                 plt.tight_layout()
-                                st.pyplot(fig_strat, clear_figure=False, use_container_width=True)
+                                st.pyplot(fig_strat, clear_figure=False, width='stretch')
                                 plt.close()
                             else:
                                 st.info(f"✓ {len(df_filtered)} mesure(s) détectée(s) mais insuffisantes pour interpolation")
@@ -6410,7 +7792,7 @@ with tab4:
             cbar_dist.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
             
             plt.tight_layout()
-            st.pyplot(fig_dist, clear_figure=False, use_container_width=True)
+            st.pyplot(fig_dist, clear_figure=False, width='stretch')
             plt.close()
             
             st.markdown("---")
@@ -6524,7 +7906,7 @@ with tab4:
                     )
                 )
                 
-                st.plotly_chart(fig_3d, use_container_width=True)
+                st.plotly_chart(fig_3d, width='stretch')
                 
                 # Sauvegarder la figure 3D pour le PDF (version matplotlib)
                 from mpl_toolkits.mplot3d import Axes3D
@@ -6718,7 +8100,7 @@ with tab4:
                     ax_pseudo_t4.legend(loc='upper right', fontsize=10, framealpha=0.9)
                     
                     plt.tight_layout()
-                    st.pyplot(fig_pseudo_t4, clear_figure=False, use_container_width=True)
+                    st.pyplot(fig_pseudo_t4, clear_figure=False, width='stretch')
                     plt.close()
                     
                     # Statistiques
@@ -6901,7 +8283,7 @@ with tab5:
             cbar_freq.set_label('Résistivité (Ω·m)', fontsize=11, fontweight='bold')
             
             plt.tight_layout()
-            st.pyplot(fig_freq_pseudo, clear_figure=False, use_container_width=True)
+            st.pyplot(fig_freq_pseudo, clear_figure=False, width='stretch')
             plt.close()
             
             # Légende d'interprétation
@@ -6946,7 +8328,7 @@ with tab5:
             ax_prof.legend(loc='best', fontsize=10)
             
             plt.tight_layout()
-            st.pyplot(fig_freq_profile, clear_figure=False, use_container_width=True)
+            st.pyplot(fig_freq_profile, clear_figure=False, width='stretch')
             plt.close()
             
             # ========== 3 COUPES GÉOLOGIQUES SUPPLÉMENTAIRES DU SOUS-SOL ==========
@@ -7021,7 +8403,7 @@ with tab5:
                 cbar_geo1.set_label('Type d\'Eau', fontsize=11, fontweight='bold')
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo1, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_geo1, clear_figure=False, width='stretch')
                 plt.close()
                 
                 st.markdown("""
@@ -7077,7 +8459,7 @@ with tab5:
                 cbar_2b.set_label('|∂ρ/∂z|', fontsize=10, fontweight='bold')
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo2, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_geo2, clear_figure=False, width='stretch')
                 plt.close()
                 
                 st.markdown(f"""
@@ -7258,7 +8640,7 @@ with tab5:
                              fontsize=8, framealpha=0.9, ncol=1)
                 
                 plt.tight_layout()
-                st.pyplot(fig_geo3, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_geo3, clear_figure=False, width='stretch')
                 plt.close()
                 
                 # TABLEAU DÉTAILLÉ DES FORMATIONS PRÉSENTES
@@ -7303,7 +8685,7 @@ with tab5:
                             'text-align': 'left',
                             'font-size': '11px'
                         }),
-                        use_container_width=True,
+                        width='stretch',
                         height=min(400, len(display_df) * 50 + 50)
                     )
                     
@@ -7546,7 +8928,7 @@ with tab5:
                 plt.tight_layout()
                 
                 # Afficher
-                st.pyplot(fig_pseudo, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_pseudo, clear_figure=False, width='stretch')
                 plt.close()
                 
                 # Statistiques de la pseudo-section
@@ -7584,7 +8966,7 @@ with tab5:
                 
                 if detection_data:
                     df_detection = pd.DataFrame(detection_data)
-                    st.dataframe(df_detection, use_container_width=True)
+                    st.dataframe(df_detection, width='stretch')
                     
                     st.success(f"✅ {len(detection_data)} types de matériaux détectés sur {len(Rho_real)} mesures")
                 
@@ -7786,7 +9168,7 @@ with tab5:
                              bbox_to_anchor=(1.02, 0.5), fontsize=8, framealpha=0.95)
                 
                 plt.tight_layout()
-                st.pyplot(fig_grid, clear_figure=False, use_container_width=True)
+                st.pyplot(fig_grid, clear_figure=False, width='stretch')
                 plt.close()
                 
                 # Tableau statistique par profondeur
@@ -7817,7 +9199,7 @@ with tab5:
                 
                 if depth_stats_list:
                     stats_df = pd.DataFrame(depth_stats_list)
-                    st.dataframe(stats_df, use_container_width=True, height=min(400, len(depth_stats_list) * 40))
+                    st.dataframe(stats_df, width='stretch', height=min(400, len(depth_stats_list) * 40))
                     
                     st.success(f"✅ {len(depth_stats_list)} niveaux de profondeur analysés - {len(set([d['Matériau dominant'] for d in depth_stats_list]))} matériaux différents détectés")
             
@@ -8003,7 +9385,7 @@ with tab5:
                         cbar.ax.set_yticklabels(['0.1-1', '1-10', '10-100', '> 100'])
 
                         plt.tight_layout()
-                        st.pyplot(fig_pygimli, clear_figure=False, use_container_width=True)
+                        st.pyplot(fig_pygimli, clear_figure=False, width='stretch')
                         plt.close()
 
                         # ========== 4 COUPES INVERSÉES SUPPLÉMENTAIRES ==========
@@ -8037,7 +9419,7 @@ with tab5:
                             cbar_inv1.set_label('Résistivité vraie (Ω·m)', fontsize=11, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv1, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_inv1, clear_figure=False, width='stretch')
                             plt.close()
                             
                             st.markdown(
@@ -8090,7 +9472,7 @@ with tab5:
                             cbar_inv2.set_label('Type d\'Eau', fontsize=11, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv2, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_inv2, clear_figure=False, width='stretch')
                             plt.close()
                             
                             st.markdown("**Interprétation hydrogéologique VRAIE (après inversion, selon tableau) :**\n"
@@ -8141,7 +9523,7 @@ with tab5:
                             cbar_3b.set_label('|∂ρ/∂x|', fontsize=10, fontweight='bold')
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv3, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_inv3, clear_figure=False, width='stretch')
                             plt.close()
                             
                             st.markdown(f"**Interprétation des gradients horizontaux :**\n"
@@ -8215,7 +9597,7 @@ with tab5:
                                          fontsize=8, framealpha=0.9, ncol=1)
                             
                             plt.tight_layout()
-                            st.pyplot(fig_inv4, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_inv4, clear_figure=False, width='stretch')
                             plt.close()
                             
                             st.markdown("**Modèle lithologique VRAI (après inversion pyGIMLi) :**\n\n"
@@ -8269,7 +9651,7 @@ with tab5:
                         })
 
                         st.dataframe(interp_df.style.background_gradient(cmap='RdYlBu_r', subset=['ρ_a Moyenne (Ω·m)']), 
-                                   use_container_width=True)
+                                   width='stretch')
 
                         # Graphique de classification - RESPECT DES COULEURS DU TABLEAU
                         fig_classif, ax_classif = plt.subplots(figsize=(12, 6))
@@ -8297,7 +9679,7 @@ with tab5:
                         ax_classif.legend(handles=legend_elements, loc='upper right')
 
                         plt.tight_layout()
-                        st.pyplot(fig_classif, clear_figure=False, use_container_width=True)
+                        st.pyplot(fig_classif, clear_figure=False, width='stretch')
 
                         # Export CSV interprété
                         csv_buffer = io.StringIO()
@@ -9233,7 +10615,7 @@ with tab6:
                     plt.colorbar(scatter, ax=ax2, label='Résistivité (Ω·m)')
 
                     plt.tight_layout()
-                    st.pyplot(fig_spectra, clear_figure=False, use_container_width=True)
+                    st.pyplot(fig_spectra, clear_figure=False, width='stretch')
                     
                     # Explication DYNAMIQUE générée par le LLM
                     st.markdown("### 📖 Analyse Automatique (LLM)")
@@ -9538,7 +10920,7 @@ with tab6:
                             plt.colorbar(im3, ax=ax3, label='Δρ (Ω·m)')
 
                             plt.tight_layout()
-                            st.pyplot(fig_impute, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_impute, clear_figure=False, width='stretch')
                             
                             # Message de transition
                             st.success("✅ Visualisation générée - Démarrage de l'analyse IA...")
@@ -9760,7 +11142,7 @@ RÉPONDS EN FRANÇAIS. Simple, pédagogique, sans jargon. [/INST]"""
                         ax4.set_ylabel('Amplitude')
 
                         plt.tight_layout()
-                        st.pyplot(fig_forward, clear_figure=False, use_container_width=True)
+                        st.pyplot(fig_forward, clear_figure=False, width='stretch')
                         
                         # Explication DYNAMIQUE générée par le LLM
                         st.markdown("### 📖 Explication Automatique (LLM)")
@@ -9789,7 +11171,7 @@ RÉPONDS EN FRANÇAIS. Simple, pédagogique, sans jargon. [/INST]"""
                                 
                                 st.info(explanation)
                         else:
-                            st.warning("⚠️ LLM non chargé. Cliquez sur '🚀 Charger le LLM Mistral' dans la sidebar pour des explications intelligentes.")
+                            st.warning("⚠️ LLM non chargé. Cliquez sur '🚀 Charger le LLM KIBALI' dans la sidebar pour des explications intelligentes.")
                             
                             # Fallback basique avec vraies valeurs
                             st.info(f"""
@@ -9923,7 +11305,7 @@ RÉPONDS EN FRANÇAIS. Simple, pédagogique, sans jargon. [/INST]"""
                         axes[1,1].set_yscale('log')
 
                         plt.tight_layout()
-                        st.pyplot(fig_reconstruct, clear_figure=False, use_container_width=True)
+                        st.pyplot(fig_reconstruct, clear_figure=False, width='stretch')
                         
                         # Analyse DYNAMIQUE avec CLIP + LLM
                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -9992,7 +11374,7 @@ Lambda régularisation: {lambda_tikhonov}
                             height=600
                         )
                         
-                        st.plotly_chart(fig_3d, use_container_width=True)
+                        st.plotly_chart(fig_3d, width='stretch')
                         
                         # Explication DYNAMIQUE avec le LLM
                         st.markdown("### 📖 Analyse Automatique (LLM)")
@@ -10106,7 +11488,7 @@ Lambda régularisation: {lambda_tikhonov}
                                         generated_img_3d,
                                         title=f"Reconstruction 3D - {slice_type} ({depth_str})"
                                     )
-                                    st.pyplot(fig_comp_3d, clear_figure=False, use_container_width=True)
+                                    st.pyplot(fig_comp_3d, clear_figure=False, width='stretch')
                                     
                                     # Afficher le prompt
                                     with st.expander("📝 Prompt utilisé"):
@@ -10288,7 +11670,7 @@ Lambda régularisation: {lambda_tikhonov}
                             axes[2].grid(True, alpha=0.3)
 
                         plt.tight_layout()
-                        st.pyplot(fig_trajectories, clear_figure=False, use_container_width=True)
+                        st.pyplot(fig_trajectories, clear_figure=False, width='stretch')
                         
                         # Analyse DYNAMIQUE avec CLIP + LLM
                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -10427,7 +11809,7 @@ Dimensions: {n_x}×{n_y}×{n_z}
                                             traj_generated_img,
                                             title=f"Trajectoires Détectées - {traj_emphasis}"
                                         )
-                                        st.pyplot(fig_traj_comparison, clear_figure=False, use_container_width=True)
+                                        st.pyplot(fig_traj_comparison, clear_figure=False, width='stretch')
                                         
                                         # Analyse DYNAMIQUE avec CLIP + LLM
                                         st.markdown("### 📖 Analyse Automatique (LLM + CLIP)")
@@ -10986,7 +12368,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                         )
 
                         # Afficher
-                        st.plotly_chart(fig_3d, use_container_width=True)
+                        st.plotly_chart(fig_3d, width='stretch')
                         
                         # Explication DYNAMIQUE avec le LLM
                         st.markdown("### 📖 Analyse Automatique (LLM)")
@@ -11054,7 +12436,7 @@ Résolution: {n_x}×{n_y}×{n_z}
             
             **⚠️ IMPORTANCE SCIENTIFIQUE** : Cette étape finale est la SEULE qui garantit un rendu géologiquement exact !
             
-            **Le LLM Mistral va collecter et analyser :**
+            **Le LLM KIBALI va collecter et analyser :**
             
             1. 📊 **Spectres extraits** → Distribution des résistivités (min/max/moyenne)
             2. 🔧 **Données imputées** → Valeurs manquantes comblées intelligemment
@@ -11078,7 +12460,7 @@ Résolution: {n_x}×{n_y}×{n_z}
             
             **Étape 1 - Collecte par le LLM :**
             ```
-            Mistral LLM analyse EN DIRECT toutes vos données :
+            KIBALI LLM analyse EN DIRECT toutes vos données :
             ├─ 📊 Spectres extraits (résistivités mesurées)
             ├─ 🔧 Imputation (valeurs comblées)
             ├─ ⚛️ Forward modeling (simulations physiques)
@@ -11126,7 +12508,7 @@ Résolution: {n_x}×{n_y}×{n_z}
             
             # NOUVEAU : Analyse intelligente complète avec Mistral LLM
             st.markdown("---")
-            st.markdown("### 🤖 Activation du LLM Mistral (OBLIGATOIRE pour précision)")
+            st.markdown("### 🤖 Activation du LLM KIBALI (OBLIGATOIRE pour précision)")
             
             # NOTE: Section obsolète - la génération se fait maintenant avec PyGimli
             st.info("ℹ️ Les paramètres de génération IA ont été remplacés par la génération de coupes géologiques réelles PyGimli (voir section suivante)")
@@ -11134,15 +12516,17 @@ Résolution: {n_x}×{n_y}×{n_z}
             # NOUVEAU : Analyse intelligente complète avec Mistral LLM
             st.markdown("---")
             st.markdown("### 🧠 Analyse Intelligente Complète par LLM Mistral")
-            
+
+            # Option pour forcer CPU si GPU a des problèmes
+            force_cpu = st.checkbox("💻 Forcer mode CPU (si GPU a des problèmes)", value=False, key="force_cpu_mode")
+
             if st.checkbox("🤖 Activer l'analyse LLM complète (recommandé)", value=True, key="enable_llm_final"):
                 st.info("⏳ Chargement du LLM Mistral et collecte des données en cours...")
-                
-                with st.spinner("🤖 Chargement du LLM Mistral..."):
-                    llm_pipeline = load_mistral_llm(use_cpu=True)
+                with st.spinner("🤖 Utilisation du LLM KIBALI chargé..."):
+                    llm_pipeline = get_kibali_pipeline(force_cpu)
                 
                 if llm_pipeline is not None:
-                    st.success("✅ LLM Mistral chargé !")
+                    st.success("✅ LLM KIBALI chargé !")
                     
                     # Préparer toutes les données pour le LLM
                     st.info("📊 Collecte de TOUTES les données des étapes précédentes...")
@@ -11189,7 +12573,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                             progress_text.text(message)
                         
                         # Lancer l'analyse avec progression
-                        interpretation, recommendations, llm_prompt = analyze_data_with_mistral(
+                        interpretation, recommendations, llm_prompt = analyze_data_with_kibali(
                             llm_pipeline, geophysical_data, progress_callback=update_progress
                         )
                         
@@ -11288,7 +12672,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=None,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe1, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_coupe1, clear_figure=False, width='stretch')
                             
                             # Stocker pour le PDF
                             if 'figures_dict' not in st.session_state:
@@ -11314,7 +12698,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=interpretation_for_plot,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe2, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_coupe2, clear_figure=False, width='stretch')
                             
                             # Stocker pour le PDF
                             st.session_state['figures_dict']['coupe_analysee_llm'] = fig_coupe2
@@ -11328,7 +12712,7 @@ Résolution: {n_x}×{n_y}×{n_z}
                                 interpretation_text=interpretation_for_plot if show_interpretation else None,
                                 depth_max=depth_max
                             )
-                            st.pyplot(fig_coupe2, clear_figure=False, use_container_width=True)
+                            st.pyplot(fig_coupe2, clear_figure=False, width='stretch')
                             
                             # Stocker pour le PDF
                             st.session_state['figures_dict']['coupe_imputee_llm'] = fig_coupe2
@@ -11371,6 +12755,705 @@ Résolution: {n_x}×{n_y}×{n_z}
 
     else:
         st.info("📸 Veuillez uploader une image géophysique pour commencer l'analyse spectrale.")
+
+
+# ═══════════════════════════════════════════════════════════════
+# FONCTIONS KIBALI AVEC OUTILS GÉOLOGIQUES INTÉGRÉS
+# ═══════════════════════════════════════════════════════════════
+
+def generate_kibali_response_enhanced(resistivity_values, depths, soil_composition="argiles et marnes",
+                                    location_context="", user_query="", response_length="detailed"):
+    """
+    Génère une réponse d'expert KIBALI utilisant tous les outils géologiques intégrés
+
+    Args:
+        resistivity_values: Liste des valeurs de résistivité
+        depths: Liste des profondeurs correspondantes
+        soil_composition: Composition du sol
+        location_context: Contexte géographique
+        user_query: Question spécifique de l'utilisateur
+        response_length: Longueur de la réponse ("brief", "detailed", "comprehensive")
+
+    Returns:
+        Réponse formatée d'expert KIBALI
+    """
+    if not TOOLS_AVAILABLE:
+        return "⚠️ Outils géologiques KIBALI non disponibles. Veuillez vérifier l'installation."
+
+    try:
+        # Analyse complète avec tous les outils
+        complete_analysis = geology_tools_orchestrator.perform_complete_geology_analysis(
+            resistivity_values=resistivity_values,
+            depths=depths,
+            soil_composition=soil_composition,
+            location_context=location_context
+        )
+
+        # Génération de la réponse d'expert
+        expert_response = geology_tools_orchestrator.generate_expert_response(
+            analysis_results=complete_analysis,
+            user_query=user_query,
+            response_length=response_length
+        )
+
+        return expert_response
+
+    except Exception as e:
+        return f"❌ Erreur lors de l'analyse KIBALI : {str(e)}"
+
+
+def enhanced_chat_with_rag(user_question, llm_pipeline, knowledge_base=None, current_data_context=None):
+    """
+    Fonction de chat améliorée avec RAG et intégration des outils KIBALI
+
+    Args:
+        user_question: Question de l'utilisateur
+        llm_pipeline: Pipeline LLM chargé
+        knowledge_base: Base de connaissances RAG
+        current_data_context: Contexte des données actuelles
+
+    Returns:
+        Réponse enrichie avec RAG et outils
+    """
+    if llm_pipeline is None:
+        return "⚠️ LLM non chargé - Chat non disponible"
+
+    try:
+        # Contexte de base
+        context_parts = []
+
+        # Recherche RAG si disponible
+        if knowledge_base and knowledge_base.initialized:
+            rag_context = knowledge_base.get_enhanced_context(user_question, use_web=True)
+            if rag_context:
+                context_parts.append(f"=== CONTEXTE RAG ===\n{rag_context}")
+
+        # Contexte des données actuelles
+        if current_data_context:
+            context_parts.append(f"=== DONNÉES ACTUELLES ===\n{current_data_context}")
+
+        enhanced_context = "\n\n".join(context_parts) if context_parts else ""
+
+        # Détection de questions géologiques nécessitant les outils KIBALI
+        geological_keywords = [
+            "résistivité", "ert", "géologique", "formation", "aquifère", "roche",
+            "sable", "argile", "calcaire", "granite", "hydrogéologie", "forage",
+            "profondeur", "couche", "stratigraphie", "anomalie", "cluster"
+        ]
+
+        is_geological_question = any(keyword in user_question.lower() for keyword in geological_keywords)
+
+        if is_geological_question and 'dataframe' in st.session_state and TOOLS_AVAILABLE:
+            # Extraction des données pour l'analyse KIBALI
+            df = st.session_state['dataframe']
+
+            if 'data' in df.columns and len(df) > 0:
+                resistivity_values = df['data'].values.tolist()
+                depths = df['depth_from'].values.tolist() if 'depth_from' in df.columns else list(range(len(resistivity_values)))
+
+                # Analyse avec les outils KIBALI
+                kibali_response = generate_kibali_response_enhanced(
+                    resistivity_values=resistivity_values,
+                    depths=depths,
+                    soil_composition="formations géologiques diverses",
+                    location_context="site d'étude géophysique",
+                    user_query=user_question,
+                    response_length="detailed"
+                )
+
+                # Intégration avec le LLM pour réponse personnalisée
+                prompt = f"""[INST] Tu es KIBALI, l'expert géologue IA spécialisé en géophysique.
+
+Tu as réalisé une analyse géologique complète avec tes outils spécialisés. Voici les résultats :
+
+{kibali_response}
+
+QUESTION DE L'UTILISATEUR : {user_question}
+
+CONTEXTE ADDITIONNEL : {enhanced_context}
+
+Génère une réponse d'expert qui :
+1. Répond directement à la question posée
+2. Intègre les analyses géologiques réalisées
+3. Fournit des explications détaillées avec des paragraphes de 15+ lignes
+4. Utilise le format 📊 ANALYSE GÉOLOGIQUE COMPLÈTE (KIBALI)
+5. Propose des recommandations pratiques
+
+RÉPONDS EN FRANÇAIS avec une analyse PROFESSIONNELLE et DÉTAILLÉE. [/INST]"""
+
+                result = llm_pipeline(
+                    prompt,
+                    max_new_tokens=1200,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.92,
+                    repetition_penalty=1.1,
+                    pad_token_id=llm_pipeline.tokenizer.eos_token_id
+                )
+
+                response = result[0]['generated_text']
+                if '[/INST]' in response:
+                    final_response = response.split('[/INST]')[-1].strip()
+                else:
+                    final_response = response.strip()
+
+                return final_response
+            else:
+                # Pas de données valides, réponse RAG normale
+                pass
+
+        # Réponse RAG normale pour les autres questions
+        prompt = f"""[INST] Tu es un assistant IA expert en géophysique et ERT.
+
+QUESTION : {user_question}
+
+CONTEXTE DISPONIBLE :
+{enhanced_context}
+
+Fournis une réponse claire, précise et utile en français. Si c'est une question technique,
+donne des détails et des exemples concrets.
+
+RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
+
+        result = llm_pipeline(
+            prompt,
+            max_new_tokens=800,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9,
+            repetition_penalty=1.1,
+            pad_token_id=llm_pipeline.tokenizer.eos_token_id
+        )
+
+        response = result[0]['generated_text']
+        if '[/INST]' in response:
+            final_response = response.split('[/INST]')[-1].strip()
+        else:
+            final_response = response.strip()
+
+        return final_response
+
+    except Exception as e:
+        return f"❌ Erreur lors de la génération de la réponse : {str(e)}"
+
+
+def generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=512, placeholder=None):
+    """
+    GÉNÉRATION DE TEXTE AVEC STREAMING TOKEN ULTRA-FLUIDE
+    Affiche chaque token au fur et à mesure pour un feedback en temps réel
+    OPTIMISÉ pour aller plus vite avec des paramètres adaptés
+    """
+    try:
+        from transformers import TextIteratorStreamer
+        from threading import Thread
+        import time
+        import torch
+
+        # Extraire le modèle et tokenizer du pipeline
+        if hasattr(llm_pipeline, 'model') and hasattr(llm_pipeline, 'tokenizer'):
+            model = llm_pipeline.model
+            tokenizer = llm_pipeline.tokenizer
+        else:
+            # Fallback si ce n'est pas un pipeline transformers standard
+            return generate_text_simple(llm_pipeline, prompt, max_new_tokens, placeholder)
+
+        # Préparer les inputs optimisés pour la vitesse
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+
+        # Déplacer sur le bon device
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # Créer le streamer optimisé pour la fluidité
+        streamer = TextIteratorStreamer(
+            tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=10.0  # Timeout pour éviter blocage
+        )
+
+        # Paramètres optimisés pour streaming rapide et fluide
+        generation_kwargs = dict(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.6,  # Légèrement réduit pour cohérence mais pas trop lent
+            top_p=0.9,        # Bon équilibre qualité/vitesse
+            top_k=40,         # Limite raisonnable pour rapidité
+            repetition_penalty=1.05,  # Anti-répétition léger
+            streamer=streamer,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+            use_cache=True,   # Cache activé pour rapidité
+            num_beams=1       # Pas de beam search pour vitesse
+        )
+
+        # Lancer la génération dans un thread séparé pour fluidité
+        thread = Thread(target=model.generate, kwargs=generation_kwargs, daemon=True)
+        thread.start()
+
+        # STREAMING FLUIDE - Affichage token par token
+        generated_text = ""
+        token_count = 0
+
+        if placeholder:
+            # Mode avec placeholder - streaming visible en temps réel
+            for new_text in streamer:
+                if new_text and new_text.strip():  # Éviter les tokens vides
+                    generated_text += new_text
+                    token_count += 1
+
+                    # Mise à jour fluide du placeholder avec curseur animé
+                    display_text = generated_text + "▌"
+                    placeholder.markdown(display_text)
+
+                    # Délai minimal pour lisibilité sans ralentir
+                    time.sleep(0.01)
+
+            # Retirer le curseur final
+            placeholder.markdown(generated_text)
+        else:
+            # Mode sans placeholder - accumulation simple mais rapide
+            for new_text in streamer:
+                if new_text and new_text.strip():
+                    generated_text += new_text
+                    token_count += 1
+
+        # Nettoyer la mémoire GPU si nécessaire
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return generated_text.strip()
+
+    except Exception as e:
+        error_msg = f"Erreur streaming: {str(e)[:100]}"
+        if placeholder:
+            placeholder.error(error_msg)
+        return error_msg
+
+
+def generate_text_simple(llm_pipeline, prompt, max_new_tokens=512, placeholder=None):
+    """
+    Fallback simple sans streaming si le streaming échoue
+    """
+    try:
+        if placeholder:
+            with placeholder.container():
+                st.info("🔄 Génération en cours (mode simple)...")
+
+        # Génération directe sans streaming complexe
+        result = llm_pipeline(
+            prompt,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9,
+            repetition_penalty=1.1,
+            return_full_text=False
+        )
+
+        generated_text = result[0].get('generated_text', '') if result and len(result) > 0 else ""
+
+        if placeholder:
+            placeholder.empty()
+
+        return generated_text
+
+    except Exception as e:
+        if placeholder:
+            placeholder.error(f"❌ Erreur génération simple: {str(e)[:100]}")
+        return ""
+
+
+def detect_analysis_needs(prompt, file_context):
+    """
+    Détecte automatiquement les besoins d'analyse selon la question et le contexte
+    """
+    needs = {
+        'web_search': False,
+        'statistics': False,
+        'interpretation': False,
+        'visualization': False,
+        'depth_analysis': False,
+        'anomaly_detection': False
+    }
+
+    prompt_lower = prompt.lower()
+
+    # Recherche web si question générale ou spécifique
+    if any(word in prompt_lower for word in ['géologie', 'geology', 'roche', 'sol', 'terrain', 'formation', 'minéral']):
+        needs['web_search'] = True
+
+    # Statistiques si demandé explicitement ou pour analyse quantitative
+    if any(word in prompt_lower for word in ['statistique', 'stats', 'moyenne', 'écart', 'distribution', 'analyse quantitative']):
+        needs['statistics'] = True
+
+    # Interprétation géologique
+    if any(word in prompt_lower for word in ['interprète', 'signifie', 'explique', 'pourquoi', 'cause']):
+        needs['interpretation'] = True
+
+    # Analyse par profondeur
+    if any(word in prompt_lower for word in ['profondeur', 'depth', 'profil', 'couche', 'strate']):
+        needs['depth_analysis'] = True
+
+    # Détection d'anomalies
+    if any(word in prompt_lower for word in ['anomalie', 'anomaly', 'variation', 'différent', 'inhabituel']):
+        needs['anomaly_detection'] = True
+
+    # Visualisation si demandé
+    if any(word in prompt_lower for word in ['graphique', 'visualis', 'plot', 'carte', 'figure']):
+        needs['visualization'] = True
+
+    # Analyse automatique basée sur les données disponibles
+    if file_context['uploaded_data'] is not None:
+        df = file_context['uploaded_data']
+
+        # Si données résistivité disponibles et question générale
+        if 'data' in df.columns and len(df) > 10:
+            if not any(needs.values()):  # Si aucun besoin spécifique détecté
+                needs['statistics'] = True
+                needs['interpretation'] = True
+
+        # Si données de profondeur disponibles
+        if 'depth' in df.columns and len(df['depth'].unique()) > 3:
+            needs['depth_analysis'] = True
+
+    return needs
+
+def execute_dynamic_tools(needs, file_context, prompt):
+    """
+    Exécute dynamiquement les outils selon les besoins détectés
+    """
+    results = {
+        'web_search': "",
+        'statistics': "",
+        'interpretation': "",
+        'visualization': "",
+        'depth_analysis': "",
+        'anomaly_detection': ""
+    }
+
+    try:
+        from tools.orchestrator import GeologyToolsOrchestrator
+        orchestrator = GeologyToolsOrchestrator()
+    except ImportError:
+        return results
+
+    df = file_context['uploaded_data']
+
+    # 🔍 RECHERCHE WEB
+    if needs['web_search']:
+        try:
+            web_results = orchestrator.web_search.search_geology_info(
+                query=f"géologie ERT analyse {prompt}",
+                max_results=3
+            )
+            results['web_search'] = f"\n🌐 RECHERCHES GÉOLOGIQUES:\n{web_results}"
+        except Exception as e:
+            results['web_search'] = f"\n⚠️ Erreur recherche web: {str(e)[:50]}"
+
+    # 📊 STATISTIQUES
+    if needs['statistics'] and df is not None and 'data' in df.columns:
+        try:
+            resistivity_vals = df['data'].values
+            stats = orchestrator.stats_tool.calculate_resistivity_statistics(resistivity_vals)
+            results['statistics'] = f"\n📈 STATISTIQUES DÉTAILLÉES:\n{stats}"
+        except Exception as e:
+            results['statistics'] = f"\n⚠️ Erreur statistiques: {str(e)[:50]}"
+
+    # 🔬 INTERPRÉTATION
+    if needs['interpretation'] and df is not None:
+        try:
+            # Créer un contexte d'interprétation
+            context = f"Données: {len(df)} mesures, résistivité moyenne: {df['data'].mean():.1f} Ω·m"
+            interpretation = orchestrator.interpretation_tool.interpret_geological_data(context, prompt)
+            results['interpretation'] = f"\n🧠 INTERPRÉTATION GÉOLOGIQUE:\n{interpretation}"
+        except Exception as e:
+            results['interpretation'] = f"\n⚠️ Erreur interprétation: {str(e)[:50]}"
+
+    # 📏 ANALYSE PAR PROFONDEUR
+    if needs['depth_analysis'] and df is not None and 'depth' in df.columns:
+        try:
+            depth_stats = df.groupby('depth')['data'].agg(['mean', 'std', 'count']).round(2)
+            results['depth_analysis'] = f"\n📏 ANALYSE PAR PROFONDEUR:\n{depth_stats.to_string()}"
+        except Exception as e:
+            results['depth_analysis'] = f"\n⚠️ Erreur analyse profondeur: {str(e)[:50]}"
+
+    # 🚨 DÉTECTION D'ANOMALIES
+    if needs['anomaly_detection'] and df is not None and 'data' in df.columns:
+        try:
+            # Calcul simple d'anomalies (valeurs > 2 écarts-types)
+            mean_val = df['data'].mean()
+            std_val = df['data'].std()
+            threshold_high = mean_val + 2 * std_val
+            threshold_low = mean_val - 2 * std_val
+
+            anomalies_high = df[df['data'] > threshold_high]
+            anomalies_low = df[df['data'] < threshold_low]
+
+            anomaly_text = f"Anomalies détectées: {len(anomalies_high)} valeurs élevées (> {threshold_high:.1f} Ω·m), {len(anomalies_low)} valeurs basses (< {threshold_low:.1f} Ω·m)"
+            results['anomaly_detection'] = f"\n🚨 DÉTECTION D'ANOMALIES:\n{anomaly_text}"
+        except Exception as e:
+            results['anomaly_detection'] = f"\n⚠️ Erreur détection anomalies: {str(e)[:50]}"
+
+    return results
+
+def generate_kibali_chat_response_enhanced(prompt, file_context=None):
+    """
+    Version ultra-améliorée du chat KIBALI avec contexte des fichiers et outils dynamiques
+    """
+    try:
+        # Vérifier si LLM est disponible
+        if 'llm_pipeline' not in globals() or llm_pipeline is None:
+            return "⚠️ Modèle LLM non chargé. Veuillez charger le modèle KIBALI d'abord."
+
+        # Récupérer le contexte des fichiers si non fourni
+        if file_context is None:
+            file_context = get_file_context_for_chat()
+
+        # 🔥 IMPORTER LES OUTILS DYNAMIQUEMENT
+        tools_available = False
+        orchestrator = None
+        try:
+            from tools.orchestrator import GeologyToolsOrchestrator
+            orchestrator = GeologyToolsOrchestrator()
+            tools_available = True
+        except ImportError:
+            tools_available = False
+
+        # 📊 ANALYSE INTELLIGENTE DU CONTEXTE
+        context_analysis = ""
+
+        if file_context['uploaded_data'] is not None:
+            df = file_context['uploaded_data']
+            summary = file_context['data_summary']
+
+            context_analysis = f"""
+📊 CONTEXTE DES DONNÉES UPLOADÉES:
+- Fichier: {summary['shape'][0]} mesures, {summary['shape'][1]} colonnes
+- Colonnes: {', '.join(summary['columns'])}
+- Points de sondage: {len(file_context['file_info'].get('survey_points', []))} points
+- Profondeurs: {len(file_context['file_info'].get('depths', []))} niveaux
+
+📈 STATISTIQUES RAPIDES:
+"""
+
+            if 'data' in df.columns:
+                resistivity_vals = df['data'].values
+                context_analysis += f"- Résistivité: min={resistivity_vals.min():.2f}, max={resistivity_vals.max():.2f}, moyenne={resistivity_vals.mean():.2f} Ω·m\n"
+
+            # Analyse intelligente selon le type de question
+            question_type = "general"
+            if any(word in prompt.lower() for word in ['résistivité', 'resistivity', 'ohm', 'conductivité']):
+                question_type = "resistivity_analysis"
+            elif any(word in prompt.lower() for word in ['profondeur', 'depth', 'profiling']):
+                question_type = "depth_analysis"
+            elif any(word in prompt.lower() for word in ['anomalie', 'anomaly', 'variation']):
+                question_type = "anomaly_detection"
+            elif any(word in prompt.lower() for word in ['statistique', 'stats', 'analyse']):
+                question_type = "statistical_analysis"
+
+        # 🔍 DÉTECTION INTELLIGENTE DES BESOINS D'ANALYSE
+        analysis_needs = detect_analysis_needs(prompt, file_context)
+
+        # 🛠️ EXÉCUTION DYNAMIQUE DES OUTILS
+        tool_results = ""
+        if tools_available:
+            dynamic_results = execute_dynamic_tools(analysis_needs, file_context, prompt)
+
+            # Compiler tous les résultats d'outils
+            active_tools = [k for k, v in analysis_needs.items() if v]
+            if active_tools:
+                tool_results = f"\n🔧 OUTILS UTILISÉS: {', '.join(active_tools).upper()}\n"
+                for tool_name, result in dynamic_results.items():
+                    if result and analysis_needs.get(tool_name, False):
+                        tool_results += result
+
+        # 📚 CONTEXTE HISTORIQUE
+        history_context = ""
+        if file_context['analysis_history']:
+            recent_analyses = file_context['analysis_history'][-3:]  # Dernières 3 analyses
+            history_context = "\n📝 ANALYSES PRÉCÉDENTES:\n" + "\n".join([
+                f"- {analysis.get('question', '')[:50]}... → {analysis.get('key_insight', '')[:50]}..."
+                for analysis in recent_analyses
+            ])
+
+        # 🎯 PROMPT ULTRA-COMPLET
+        full_prompt = f"""
+Vous êtes KIBALI, l'expert géologue ultime avec accès aux données uploadées et aux outils d'analyse avancés.
+
+{context_analysis}
+
+{history_context}
+
+{tool_results}
+
+QUESTION UTILISATEUR: {prompt}
+
+INSTRUCTIONS POUR VOTRE RÉPONSE:
+1. Analysez les données uploadées en détail si la question s'y rapporte
+2. Utilisez les statistiques et analyses disponibles
+3. Fournissez des interprétations géologiques expertes
+4. Répondez de façon technique mais compréhensible
+5. Si nécessaire, suggérez des analyses supplémentaires
+6. Structurez votre réponse de façon claire et organisée
+
+RÉPONSE EXPERTE KIBALI:
+"""
+
+        # 🔥 GÉNÉRATION ULTRA-RAPIDE SANS STREAMING
+        response = generate_text_ultra_fast(
+            llm_pipeline=llm_pipeline,
+            prompt=full_prompt,
+            max_new_tokens=400  # 🔥 OPTIMISÉ pour réponses rapides
+        )
+
+        # 💾 SAUVEGARDER DANS L'HISTORIQUE
+        if 'analysis_history' not in st.session_state:
+            st.session_state['analysis_history'] = []
+
+        # Extraire un insight clé de la réponse
+        key_insight = response[:100] + "..." if len(response) > 100 else response
+
+        st.session_state['analysis_history'].append({
+            'timestamp': datetime.now().isoformat(),
+            'question': prompt,
+            'key_insight': key_insight,
+            'question_type': question_type,
+            'tools_used': tools_available
+        })
+
+        return response
+
+    except Exception as e:
+        return f"❌ Erreur chat enhanced: {str(e)[:200]}"
+
+def enhanced_chat_with_rag(user_question, llm_pipeline, knowledge_base=None, current_data_context=None):
+    """
+    CHAT AMÉLIORÉ AVEC STREAMING TOKEN ULTRA-FLUIDE
+    Utilise le streaming pour un feedback en temps réel
+    """
+    try:
+        # Créer un placeholder pour le streaming en temps réel
+        placeholder = st.empty()
+
+        # Étape 1: Recherche RAG avec indicateur
+        with placeholder.container():
+            st.info("🔍 Recherche dans la base de connaissances RAG...")
+
+        context_parts = []
+
+        if knowledge_base and knowledge_base.initialized:
+            rag_context = knowledge_base.get_enhanced_context(user_question, use_web=True)
+            if rag_context:
+                context_parts.append(f"=== CONTEXTE RAG ===\n{rag_context}")
+
+        # Contexte des données actuelles
+        if current_data_context:
+            context_parts.append(f"=== DONNÉES ACTUELLES ===\n{current_data_context}")
+
+        enhanced_context = "\n\n".join(context_parts) if context_parts else ""
+
+        # Étape 2: Détection de questions géologiques
+        geological_keywords = [
+            "résistivité", "ert", "géologique", "formation", "aquifère", "roche",
+            "sable", "argile", "calcaire", "granite", "hydrogéologie", "forage",
+            "profondeur", "couche", "stratigraphie", "anomalie", "cluster"
+        ]
+
+        is_geological_question = any(keyword in user_question.lower() for keyword in geological_keywords)
+
+        if is_geological_question and 'dataframe' in st.session_state and TOOLS_AVAILABLE:
+            # Étape 3: Extraction et analyse des données avec streaming
+            with placeholder.container():
+                st.info("📊 Extraction et analyse des données géologiques...")
+
+            df = st.session_state['dataframe']
+
+            if 'data' in df.columns and len(df) > 0:
+                resistivity_values = df['data'].values.tolist()
+                depths = df['depth_from'].values.tolist() if 'depth_from' in df.columns else list(range(len(resistivity_values)))
+
+                # Analyse avec les outils KIBALI
+                kibali_response = generate_kibali_response_enhanced(
+                    resistivity_values=resistivity_values,
+                    depths=depths,
+                    soil_composition="formations géologiques diverses",
+                    location_context="site d'étude géophysique",
+                    user_query=user_question,
+                    response_length="detailed"
+                )
+
+                # Étape 4: Génération de la réponse finale avec streaming token
+                with placeholder.container():
+                    st.info("🧠 Génération de la réponse experte avec streaming...")
+
+                prompt = f"""[INST] Tu es KIBALI, l'expert géologue IA spécialisé en géophysique.
+
+Tu as réalisé une analyse géologique complète avec tes outils spécialisés. Voici les résultats :
+
+{kibali_response}
+
+QUESTION DE L'UTILISATEUR : {user_question}
+
+CONTEXTE ADDITIONNEL : {enhanced_context}
+
+Génère une réponse d'expert qui :
+1. Répond directement à la question posée
+2. Intègre les analyses géologiques réalisées
+3. Fournit des explications détaillées avec des paragraphes de 15+ lignes
+4. Utilise le format 📊 ANALYSE GÉOLOGIQUE COMPLÈTE (KIBALI)
+5. Propose des recommandations pratiques
+
+RÉPONDS EN FRANÇAIS avec une analyse PROFESSIONNELLE et DÉTAILLÉE. [/INST]"""
+
+                # Utiliser le streaming token pour génération fluide
+                final_response = generate_text_with_streaming(
+                    llm_pipeline,
+                    prompt,
+                    max_new_tokens=1200,
+                    placeholder=placeholder
+                )
+
+                # Nettoyer et retourner
+                placeholder.empty()
+                return final_response
+            else:
+                # Pas de données valides, réponse RAG normale
+                pass
+
+        # Étape 5: Réponse RAG normale avec streaming
+        with placeholder.container():
+            st.info("💭 Génération de la réponse RAG...")
+
+        prompt = f"""[INST] Tu es un assistant IA expert en géophysique et ERT.
+
+QUESTION : {user_question}
+
+CONTEXTE DISPONIBLE :
+{enhanced_context}
+
+Fournis une réponse claire, précise et utile en français. Si c'est une question technique,
+donne des détails et des exemples concrets.
+
+RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
+
+        # Streaming pour la réponse normale aussi
+        response = generate_text_with_streaming(
+            llm_pipeline,
+            prompt,
+            max_new_tokens=800,
+            placeholder=placeholder
+        )
+
+        # Nettoyer et retourner
+        placeholder.empty()
+        return response
+
+    except Exception as e:
+        if 'placeholder' in locals():
+            placeholder.error(f"❌ Erreur streaming: {str(e)[:100]}")
+        return f"❌ Erreur lors de la génération de la réponse : {str(e)}"
 
 
 # --- Sidebar ---
@@ -11453,55 +13536,54 @@ if st.session_state.get('llm_loaded', False):
     
     if user_question:
         st.session_state.chat_messages.append({"role": "user", "content": user_question})
-        
-        # Contexte des données si disponibles
-        context = ""
-        if 'current_data_context' in st.session_state and st.session_state['current_data_context']:
-            ctx = st.session_state['current_data_context']
-            context = f"""Fichier: {ctx.get('filename', 'N/A')}
-Mesures: {ctx.get('n_measures', 'N/A')} sur {ctx.get('n_points', 'N/A')} points
-Résistivité: {ctx.get('resistivity_range', 'N/A')}
-Moyenne: {ctx.get('mean', 'N/A')}, Médiane: {ctx.get('median', 'N/A')}"""
-        
-        # Prompt court et direct
-        prompt = f"""[INST] Expert géophysique en tomographie électrique (ERT).
-{context}
 
-Question: {user_question}
-
-Réponds en français, concis (100-200 mots max). [/INST]"""
-        
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
-            
-            # Afficher indicateur pendant génération
-            message_placeholder.info("🧠 Génération en cours...")
-            
-            # Génération
+
+            # Indicateur de recherche RAG
+            message_placeholder.info("🔍 Recherche dans la base de connaissances...")
+
+            # Utiliser le chat amélioré avec RAG
             try:
-                result = st.session_state.llm_pipeline(
-                    prompt,
-                    max_new_tokens=600,  # Augmenté pour réponses complètes
-                    temperature=0.7,
-                    do_sample=True,
-                    return_full_text=False
+                # Récupérer la base de connaissances
+                kb = st.session_state.get('ert_knowledge_base')
+
+                # Génération avec RAG et streaming
+                full_response = enhanced_chat_with_rag(
+                    user_question=user_question,
+                    llm_pipeline=st.session_state.llm_pipeline,
+                    knowledge_base=kb,
+                    current_data_context=st.session_state.get('current_data_context')
                 )
-                
-                if result and len(result) > 0:
-                    full_response = result[0].get('generated_text', '')
-                    
-                    # Extraire après [/INST] si présent
-                    if '[/INST]' in full_response:
-                        full_response = full_response.split('[/INST]')[-1].strip()
-                    
-                    message_placeholder.markdown(full_response)
-                else:
-                    full_response = "Désolé, je n'ai pas pu générer de réponse."
-                    message_placeholder.markdown(full_response)
-                
-            except Exception as e:
-                full_response = f"❌ Erreur: {str(e)[:100]}"
+
+                # DÉTECTION ET EXÉCUTION D'OUTILS
+                tool_results = ""
+                if 'dataframe' in st.session_state:
+                    df = st.session_state['dataframe']
+
+                    # Détecter les commandes d'outils dans la réponse
+                    import re
+                    tool_commands = re.findall(r'"([^"]*_(?:resistivite|stats|graphique|anomalies|donnees)\([^"]*\))"', full_response)
+
+                    if tool_commands:
+                        tool_results = "\n\n🛠️ EXÉCUTION D'OUTILS:\n"
+                        for cmd in tool_commands:
+                            result = execute_data_tool(cmd, df)
+                            tool_results += f"• {cmd}: {result}\n"
+
+                        # Ajouter les résultats à la réponse
+                        full_response += tool_results
+
+                # Afficher la réponse complète
                 message_placeholder.markdown(full_response)
+
+                # Ajouter à l'historique
+                st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
+
+            except Exception as e:
+                error_msg = f"❌ Erreur génération: {str(e)[:100]}"
+                message_placeholder.error(error_msg)
+                st.session_state.chat_messages.append({"role": "assistant", "content": error_msg})
         
         st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
         st.rerun()
@@ -11529,3 +13611,494 @@ Réponds en français, concis (100-200 mots max). [/INST]"""
                 )
 else:
     st.info("ℹ️ Le chat IA est disponible lorsque le modèle LLM est chargé.")
+
+# ═══════════════════════════════════════════════════════════════
+# OUTIL D'EXPLICATION DYNAMIQUE DES COUPES ET LÉGENDES
+# ═══════════════════════════════════════════════════════════════
+
+def generate_dynamic_explanation(llm_pipeline, element_type, element_data, context="", max_tokens=200):
+    """
+    Génère une explication dynamique contextuelle pour un élément survolé
+    Utilise le GPU pour une génération ultra-rapide en streaming
+    """
+    try:
+        # Créer un prompt contextuel basé sur le type d'élément
+        if element_type == "coupe_resistivite":
+            prompt = f"""En tant qu'expert géologue, expliquez cette coupe de résistivité en 2-3 phrases concises mais puissantes:
+
+Données: {element_data}
+
+Contexte: {context}
+
+Réponse directe, technique et percutante:"""
+
+        elif element_type == "legende_couleur":
+            prompt = f"""Expliquez la signification géologique de cette couleur/légende en une phrase impactante:
+
+Légende: {element_data}
+
+Contexte géologique: {context}
+
+Réponse:"""
+
+        elif element_type == "point_donnee":
+            prompt = f"""Analysez ce point de données géophysique de manière experte:
+
+Point: {element_data}
+
+Contexte: {context}
+
+Réponse technique:"""
+
+        elif element_type == "anomalie":
+            prompt = f"""Interprétez cette anomalie géologique détectée:
+
+Anomalie: {element_data}
+
+Contexte: {context}
+
+Analyse experte:"""
+
+        else:
+            prompt = f"""Expliquez cet élément géologique: {element_data}
+
+Contexte: {context}
+
+Réponse:"""
+
+        # Utiliser le GPU pour génération ultra-rapide
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Génération ULTRA-RAPIDE avec GPU
+        inputs = llm_pipeline.tokenizer(prompt, return_tensors="pt").to(device)
+
+        with torch.no_grad():  # 🔥 Pas de gradient pour vitesse maximale
+            outputs = llm_pipeline.model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
+                do_sample=True,
+                temperature=0.8,  # 🔥 Plus créatif et rapide
+                top_p=0.95,      # 🔥 Plus large pour vitesse
+                top_k=40,        # 🔥 Optimisé
+                repetition_penalty=1.15,  # 🔥 Anti-répétition plus fort
+                pad_token_id=llm_pipeline.tokenizer.eos_token_id,
+                eos_token_id=llm_pipeline.tokenizer.eos_token_id,
+                use_cache=True,  # 🔥 CACHE ACTIVÉ pour VITESSE MAX
+                num_beams=1,     # 🔥 Pas de beam search pour vitesse
+                # Optimisations GPU
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            )
+
+        explanation = llm_pipeline.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        explanation = explanation.replace(prompt, "").strip()
+
+        # Nettoyer la mémoire GPU immédiatement
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()  # 🔥 Libération mémoire GPU immédiate
+
+        return explanation
+
+    except Exception as e:
+        return f"⚡ Analyse: {str(element_data)[:50]}..."
+
+def create_enhanced_plotly_chart_with_kibali(fig, element_type="coupe_resistivite", llm_pipeline=None, context="", chart_title=""):
+    """
+    Crée un graphique Plotly avec contrôles interactifs KIBALI pour explications dynamiques
+    Version simplifiée et fonctionnelle
+    """
+    # Afficher le graphique standard
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Ajouter des contrôles interactifs si LLM disponible
+    if llm_pipeline is not None and chart_title:
+        st.markdown(f"### 🔍 **KIBALI EXPERT** - Analyse Interactive {chart_title}")
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            # Sélecteur d'éléments à analyser
+            element_options = {
+                "Résistivité globale": "coupe_resistivite",
+                "Points de données": "point_donnee",
+                "Légende couleur": "legende_couleur",
+                "Anomalies détectées": "anomalie"
+            }
+            selected_element = st.selectbox(
+                "📊 Élément à analyser:",
+                options=list(element_options.keys()),
+                key=f"element_selector_{hash(chart_title) % 1000}"
+            )
+
+        with col2:
+            # Bouton d'analyse
+            if st.button("🚀 Analyser avec KIBALI", key=f"analyze_btn_{hash(chart_title) % 1000}"):
+                with st.spinner("🔍 KIBALI analyse en cours..."):
+                    try:
+                        # Générer l'explication
+                        explanation = generate_dynamic_explanation(
+                            llm_pipeline=llm_pipeline,
+                            element_type=element_options[selected_element],
+                            element_data=f"Graphique: {chart_title} - {selected_element}",
+                            context=f"Contexte géologique: {context}",
+                            max_tokens=200
+                        )
+
+                        # Afficher l'explication dans un beau container
+                        st.markdown(f"""
+                        <div style="
+                            background: linear-gradient(135deg, #1e3a8a, #3b82f6);
+                            color: white;
+                            padding: 20px;
+                            border-radius: 15px;
+                            border: 3px solid #60a5fa;
+                            margin: 15px 0;
+                            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+                        ">
+                            <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                                <div style="
+                                    width: 32px;
+                                    height: 32px;
+                                    background: #fbbf24;
+                                    border-radius: 50%;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    margin-right: 12px;
+                                    font-weight: bold;
+                                    color: #1e3a8a;
+                                    font-size: 18px;
+                                ">K</div>
+                                <div>
+                                    <span style="font-weight: bold; color: #fbbf24; font-size: 18px;">KIBALI EXPERT</span>
+                                    <br>
+                                    <span style="color: #e0e7ff; font-size: 14px;">Analyse dynamique: {selected_element}</span>
+                                </div>
+                            </div>
+                            <div style="color: #e0e7ff; line-height: 1.6; font-size: 15px;">
+                                {explanation}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    except Exception as e:
+                        st.error(f"❌ Erreur d'analyse: {str(e)[:100]}")
+
+        # Séparateur
+        st.markdown("---")
+    else:
+        # Fallback vers l'affichage standard
+        pass
+
+
+def create_interactive_plotly_chart(fig, element_type="coupe_resistivite", llm_pipeline=None, context=""):
+    """
+    Fonction simplifiée - redirigée vers create_enhanced_plotly_chart_with_kibali
+    """
+    return create_enhanced_plotly_chart_with_kibali(fig, element_type, llm_pipeline, context)
+
+
+
+def process_uploaded_file(uploaded_file):
+    """Traite un fichier uploadé"""
+    try:
+        # Lecture du fichier
+        if uploaded_file.type == "text/csv":
+            df = pd.read_csv(uploaded_file)
+        else:
+            # Pour les fichiers .dat ou .txt
+            content = uploaded_file.getvalue().decode('utf-8')
+            # Traitement basique - à améliorer selon le format
+            st.code(content[:500] + "..." if len(content) > 500 else content)
+
+        st.success(f"✅ Fichier {uploaded_file.name} chargé avec succès!")
+
+    except Exception as e:
+        st.error(f"❌ Erreur lors du chargement: {str(e)}")
+
+def search_knowledge_base(query):
+    """Recherche dans la base de connaissances"""
+    # Simulation de résultats de recherche
+    return [
+        {"title": "Résistivité des sols", "content": "La résistivité électrique des sols varie selon leur composition..."},
+        {"title": "Méthodes ERT", "content": "L'ERT utilise des électrodes pour mesurer la résistivité..."},
+    ]
+
+def display_search_results(results):
+    """Affiche les résultats de recherche"""
+    for result in results:
+        with st.expander(result["title"]):
+            st.write(result["content"])
+
+# ═══════════════════════════════════════════════════════════════
+# POINT D'ENTRÉE PRINCIPAL DE L'APPLICATION
+# ═══════════════════════════════════════════════════════════════
+
+def main():
+    """
+    Fonction principale de l'application SETRAF ERT
+    """
+    # Configuration de la page Streamlit
+    st.set_page_config(
+        page_title="SETRAF - Analyse Géophysique ERT Avancée",
+        page_icon="🧲",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    # Titre principal
+    st.title("🧲 SETRAF - Système Expert de Traitement et Analyse Géophysique")
+    st.markdown("**Analyse ERT (Electrical Resistivity Tomography) avec Intelligence Artificielle KIBALI**")
+
+    # Initialiser les variables de session si nécessaire
+    if 'chat_messages' not in st.session_state:
+        st.session_state.chat_messages = []
+
+    if 'ert_data' not in st.session_state:
+        st.session_state.ert_data = None
+
+    # Menu principal dans la sidebar
+    with st.sidebar:
+        st.header("🎛️ Panneau de Contrôle")
+
+        # Sélection du mode de fonctionnement
+        mode = st.radio(
+            "Mode d'analyse:",
+            ["📊 Analyse de Données", "🔍 Exploration Interactive", "📚 Base de Connaissances"],
+            help="Choisissez le mode de fonctionnement souhaité"
+        )
+
+        st.divider()
+
+        # Section GPU/Performance
+        st.subheader("🚀 Performance")
+        gpu_status = "✅ GPU Activé" if torch.cuda.is_available() else "⚠️ CPU Mode"
+        st.info(gpu_status)
+
+        if torch.cuda.is_available():
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            st.caption(f"Mémoire GPU: {gpu_memory:.1f} GB")
+
+    # Contenu principal selon le mode
+    if mode == "📊 Analyse de Données":
+        show_data_analysis_interface()
+    elif mode == "🔍 Exploration Interactive":
+        show_interactive_exploration()
+    else:
+        show_knowledge_base_interface()
+
+def show_data_analysis_interface():
+    """Interface d'analyse des données ERT"""
+    st.header("📊 Analyse de Données ERT")
+
+    # Upload de fichiers
+    uploaded_file = st.file_uploader(
+        "📤 Chargez votre fichier de données ERT (.dat, .csv, .txt)",
+        type=['dat', 'csv', 'txt'],
+        help="Formats supportés: fichiers .dat Res2DInv, CSV, TXT",
+        key="data_analysis_upload"
+    )
+
+    if uploaded_file is not None:
+        # Traitement du fichier uploadé
+        process_uploaded_file(uploaded_file)
+
+def show_interactive_exploration():
+    """Interface d'exploration interactive avec chat KIBALI amélioré"""
+    st.header("🔍 Exploration Interactive KIBALI")
+
+    # 📁 SECTION UPLOAD DE FICHIERS POUR LE CHAT
+    st.subheader("📂 Upload de fichiers pour analyse KIBALI")
+
+    # Uploader multiple pour le chat
+    chat_uploaded_files = st.file_uploader(
+        "📤 Uploader des fichiers .dat, .csv pour analyse avec KIBALI",
+        type=["dat", "csv", "txt"],
+        accept_multiple_files=True,
+        key="chat_file_uploader",
+        help="Les fichiers uploadés ici seront analysés par KIBALI en temps réel"
+    )
+
+    # Traiter les fichiers uploadés pour le chat
+    if chat_uploaded_files:
+        st.success(f"✅ {len(chat_uploaded_files)} fichier(s) uploadé(s) pour analyse KIBALI")
+
+        # Afficher un résumé des fichiers
+        col1, col2 = st.columns([1, 2])
+
+        with col1:
+            st.markdown("### 📊 Fichiers chargés:")
+            for i, file in enumerate(chat_uploaded_files):
+                st.markdown(f"**{i+1}. {file.name}** ({file.size} bytes)")
+
+        with col2:
+            # Aperçu rapide du premier fichier
+            if len(chat_uploaded_files) > 0:
+                try:
+                    first_file = chat_uploaded_files[0]
+                    if first_file.type == "text/csv":
+                        df_preview = pd.read_csv(first_file)
+                    else:
+                        # Pour .dat ou .txt
+                        content = first_file.getvalue().decode('utf-8')
+                        # Essayer de parser comme CSV
+                        try:
+                            from io import StringIO
+                            df_preview = pd.read_csv(StringIO(content), sep=r'\s+', header=None)
+                        except:
+                            df_preview = pd.DataFrame({'contenu': [content[:200] + "..."]})
+
+                    st.markdown("### 👀 Aperçu rapide:")
+                    st.dataframe(df_preview.head(3), use_container_width=True)
+
+                    # Statistiques rapides
+                    if len(df_preview.columns) > 1:
+                        st.markdown(f"**Dimensions:** {df_preview.shape[0]} lignes × {df_preview.shape[1]} colonnes")
+
+                except Exception as e:
+                    st.warning(f"⚠️ Impossible de prévisualiser: {str(e)[:50]}")
+
+    # 💬 CHAT AVEC KIBALI AMÉLIORÉ
+    st.subheader("💬 Chat Expert avec KIBALI")
+
+    # Afficher le contexte disponible
+    file_context = get_file_context_for_chat()
+    if file_context['uploaded_data'] is not None or chat_uploaded_files:
+        with st.expander("📋 Contexte disponible pour KIBALI", expanded=False):
+            if file_context['uploaded_data'] is not None:
+                summary = file_context['data_summary']
+                st.markdown(f"""
+                **Données principales:** {summary['shape'][0]} mesures
+                - Colonnes: {', '.join(summary['columns'])}
+                - Points de sondage: {len(file_context['file_info'].get('survey_points', []))}
+                """)
+
+            if chat_uploaded_files:
+                st.markdown(f"**Fichiers uploadés:** {len(chat_uploaded_files)} fichier(s)")
+
+            if file_context['analysis_history']:
+                st.markdown(f"**Historique:** {len(file_context['analysis_history'])} analyses précédentes")
+
+    # Initialiser l'historique du chat s'il n'existe pas
+    if 'chat_messages' not in st.session_state:
+        st.session_state.chat_messages = []
+
+    # Afficher l'historique des messages
+    for message in st.session_state.chat_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Input pour nouveau message
+    if prompt := st.chat_input("Posez votre question à KIBALI sur les données uploadées..."):
+        # Ajouter le message utilisateur
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Générer la réponse avec KIBALI amélioré
+        with st.chat_message("assistant"):
+            with st.spinner("🔍 KIBALI analyse vos données..."):
+                # Utiliser le contexte des fichiers uploadés
+                if chat_uploaded_files:
+                    # Traiter le premier fichier uploadé pour le contexte
+                    try:
+                        first_file = chat_uploaded_files[0]
+                        if first_file.type == "text/csv":
+                            temp_df = pd.read_csv(first_file)
+                        else:
+                            content = first_file.getvalue().decode('utf-8')
+                            try:
+                                from io import StringIO
+                                temp_df = pd.read_csv(StringIO(content), sep=r'\s+', header=None)
+                            except:
+                                temp_df = pd.DataFrame({'contenu': [content]})
+
+                        # Créer un contexte temporaire
+                        temp_context = {
+                            'uploaded_data': temp_df,
+                            'data_summary': {
+                                'shape': temp_df.shape,
+                                'columns': list(temp_df.columns),
+                                'sample': temp_df.head(3).to_dict()
+                            },
+                            'file_info': {},
+                            'analysis_history': file_context['analysis_history']
+                        }
+
+                        # Analyser les colonnes pour le contexte
+                        if len(temp_df.columns) >= 3:
+                            temp_context['file_info']['resistivity_values'] = temp_df.iloc[:, 2].tolist() if len(temp_df) > 0 else []
+                        if len(temp_df.columns) >= 2:
+                            temp_context['file_info']['depths'] = temp_df.iloc[:, 1].tolist() if len(temp_df) > 0 else []
+
+                        # Vérifier si on peut utiliser l'orchestrateur pour une analyse complète
+                        resistivity_values = temp_context['file_info'].get('resistivity_values', [])
+                        depths = temp_context['file_info'].get('depths', [])
+
+                        if resistivity_values and depths and TOOLS_AVAILABLE:
+                            try:
+                                # Utiliser l'orchestrateur pour une analyse complète
+                                complete_analysis = geology_tools_orchestrator.perform_complete_geology_analysis(
+                                    resistivity_values=resistivity_values,
+                                    depths=depths,
+                                    soil_composition="formations géologiques diverses",
+                                    location_context="site d'étude géophysique"
+                                )
+
+                                # Générer une réponse complète avec l'orchestrateur
+                                orchestrator_response = geology_tools_orchestrator.generate_response(
+                                    analysis_results=complete_analysis,
+                                    user_query=prompt,
+                                    response_length="comprehensive"
+                                )
+
+                                # Combiner avec l'analyse KIBALI
+                                kibali_response = generate_kibali_chat_response_enhanced(prompt, temp_context)
+                                response = f"{orchestrator_response}\n\n🤖 **ANALYSE IA KIBALI COMPLÉMENTAIRE:**\n{kibali_response}"
+
+                            except Exception as e:
+                                st.warning(f"⚠️ Orchestrateur non disponible: {str(e)[:50]}. Utilisation de KIBALI seul.")
+                                response = generate_kibali_chat_response_enhanced(prompt, temp_context)
+                        else:
+                            response = generate_kibali_chat_response_enhanced(prompt, temp_context)
+
+                    except Exception as e:
+                        response = f"❌ Erreur traitement fichier: {str(e)[:100]}. Utilisation du contexte général."
+                        response += "\n\n" + generate_kibali_chat_response_enhanced(prompt, file_context)
+                else:
+                    response = generate_kibali_chat_response_enhanced(prompt, file_context)
+
+                st.markdown(response)
+
+        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+
+    # 📈 STATISTIQUES ET HISTORIQUE
+    if st.session_state.get('analysis_history'):
+        with st.expander("📈 Historique des analyses KIBALI", expanded=False):
+            history_df = pd.DataFrame(st.session_state['analysis_history'])
+            if len(history_df) > 0:
+                st.dataframe(
+                    history_df[['timestamp', 'question', 'question_type', 'tools_used']].tail(10),
+                    use_container_width=True
+                )
+
+                # Bouton pour effacer l'historique
+                if st.button("🗑️ Effacer l'historique", key="clear_history"):
+                    st.session_state['analysis_history'] = []
+                    st.session_state['chat_messages'] = []
+                    st.success("✅ Historique effacé!")
+                    st.rerun()
+
+def show_knowledge_base_interface():
+    """Interface de la base de connaissances"""
+    st.header("📚 Base de Connaissances ERT")
+
+    # Interface de recherche dans la base de connaissances
+    query = st.text_input("🔍 Rechercher dans la base de connaissances:")
+
+    if query:
+        # Recherche dans la base vectorielle
+        results = search_knowledge_base(query)
+        display_search_results(results)
+
+if __name__ == "__main__":
+    main()

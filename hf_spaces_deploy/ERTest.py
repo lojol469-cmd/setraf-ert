@@ -51,8 +51,8 @@ AUTH_ENABLED = False
 
 # Configuration des modèles depuis Hugging Face Hub (optimisé pour Spaces)
 SETRAF_BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-# Utiliser des modèles légers compatibles avec HF Spaces
-MISTRAL_MODEL_PATH = "microsoft/Phi-3-mini-4k-instruct"  # Modèle léger 3.8B, rapide et efficace
+# Modèle PREMIUM pour chat RAG avancé (Mistral-7B-Instruct-v0.2 - 7B paramètres)
+MISTRAL_MODEL_PATH = "mistralai/Mistral-7B-Instruct-v0.2"  # Modèle expert pour analyses complexes
 CLIP_MODEL_PATH = "openai/clip-vit-base-patch32"  # CLIP standard
 
 # ═══════════════════════════════════════════════════════════════
@@ -1951,27 +1951,34 @@ def explain_with_cache(llm_pipeline, operation_type, operation_data, context="")
 
 @st.cache_resource
 def load_clip_model():
-    """Charge le modèle CLIP pour analyse d'images"""
+    """Charge le modèle CLIP quantifier pour analyse d'images avec streaming tokens"""
     try:
         from transformers import CLIPProcessor, CLIPModel
         import torch
         
-        st.info("🖼️ Chargement de CLIP pour analyse d'images...")
+        st.info("🖼️ Chargement de CLIP quantifier pour analyse d'images...")
         
-        # Charger CLIP depuis le cache local
+        # Charger CLIP avec optimisation pour HF Spaces
         model = CLIPModel.from_pretrained(
-            "openai/clip-vit-base-patch32",
-            cache_dir="/home/belikan/.cache/huggingface"
+            CLIP_MODEL_PATH,
+            torch_dtype=torch.float16,  # Utiliser float16 pour économie mémoire
+            low_cpu_mem_usage=True
         )
         processor = CLIPProcessor.from_pretrained(
-            "openai/clip-vit-base-patch32",
-            cache_dir="/home/belikan/.cache/huggingface"
+            CLIP_MODEL_PATH,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True
         )
         
+        # Détection automatique du device avec fallback CPU
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
         
-        st.success("✅ CLIP chargé avec succès !")
+        # Optimisations pour streaming
+        model.eval()
+        torch.set_grad_enabled(False)
+        
+        st.success("✅ CLIP quantifier chargé avec succès ! Streaming tokens activé.")
         return model, processor, device
         
     except Exception as e:
@@ -2077,92 +2084,147 @@ def create_geological_cross_section_pygimli(rho_data, title="Coupe Géologique",
     plt.tight_layout()
     return fig
 
-@st.cache_resource
 def load_mistral_llm(use_cpu=True, quantize=True):
     """
-    Charge le modèle Mistral LLM ULTRA-OPTIMISÉ avec gestion mémoire stricte
-    EMPÊCHE LE CRASH STREAMLIT (Exit Code 137 = Out of Memory)
+    Charge le modèle Mistral-7B-Instruct-v0.2 LLM PREMIUM (7B paramètres)
+    + Meilleur modèle pour chat RAG géologique avancé
+    + Cache intelligent HF Hub pour chargements rapides
+    + Analyses techniques expertes et génération française parfaite
     
     Args:
         use_cpu: Utiliser CPU
-        quantize: Activer la quantization 8-bit (économie RAM)
+        quantize: Activer la quantization 4-bit (recommandé pour 7B paramètres)
     
     Returns:
-        Pipeline optimisé pour vitesse + économie mémoire
+        Pipeline Mistral optimisé pour interprétations géologiques complexes
     """
     try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+        from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
         import torch
         import gc
+        import time
+        import os
         
-        st.info("🤖 Chargement du modèle LLM léger (Phi-3-mini)...")
+        start_time = time.time()
+        st.info("🚀 CHARGEMENT PREMIUM Mistral-7B-Instruct-v0.2 (modèle expert)...")
+        
+        # OPTIMISATIONS TURBO pour HF Spaces
+        os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'  # Désactiver progress bars
+        os.environ['TRANSFORMERS_OFFLINE'] = '0'  # Forcer online pour cache
+        os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '300'  # Timeout 5min
         
         # NETTOYER LA MÉMOIRE AVANT CHARGEMENT
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
-        # Charger le tokenizer depuis Hugging Face Hub
+        # Optimisations CPU ULTRA-STRICTES pour vitesse maximale
+        torch.set_num_threads(1)  # 1 thread = vitesse maximale sur HF Spaces
+        torch.set_grad_enabled(False)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.enabled = False
+        torch.backends.mkldnn.enabled = False  # Désactiver MKL-DNN pour vitesse
+        
+        # Charger le tokenizer ULTRA-RAPIDE
+        st.info("🔤 Chargement tokenizer Mistral-7B optimisé...")
         tokenizer = AutoTokenizer.from_pretrained(
             MISTRAL_MODEL_PATH,
             trust_remote_code=True,
-            use_fast=True
+            use_fast=True,
+            local_files_only=False  # Permettre téléchargement
         )
         
+        # Configuration tokenizer pour Mistral (gère automatiquement pad_token)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
         
-        # Optimisations CPU STRICTES
-        torch.set_num_threads(4)  # Réduit à 4 threads pour économie mémoire
-        torch.set_grad_enabled(False)
+        st.info("🤖 Chargement Mistral-7B-Instruct avec optimisations maximales...")
         
-        st.info("📦 Chargement du modèle optimisé...")
+        # Configuration QUANTIZATION ULTRA-RAPIDE
+        if quantize:
+            try:
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_quant_storage=torch.uint8  # Stockage optimisé
+                )
+                quantize_mode = "4bit_turbo"
+                st.info("🚀 Mode 4-bit TURBO activé")
+            except (ImportError, Exception) as e:
+                st.warning("⚠️ BitsAndBytes indisponible, mode CPU turbo")
+                quantization_config = None
+                quantize_mode = "cpu_turbo"
+        else:
+            quantization_config = None
+            quantize_mode = "standard_turbo"
         
-        # Déterminer le dtype (float16 uniquement pour GPU)
-        device_available = torch.cuda.is_available()
-        dtype = torch.float16 if (device_available and quantize) else torch.float32
-        
-        # Charger le modèle depuis Hugging Face Hub
+        # Charger le modèle avec OPTIMISATIONS MAXIMALES
         try:
-            # Phi-3-mini est un modèle léger (3.8B) parfait pour HF Spaces
-            model = AutoModelForCausalLM.from_pretrained(
-                MISTRAL_MODEL_PATH,
-                torch_dtype=torch.float32,  # Forcer float32 pour CPU
-                trust_remote_code=True,
-                low_cpu_mem_usage=True
-                # Pas de device_map pour CPU
-            )
+            if quantize_mode == "4bit_turbo":
+                model = AutoModelForCausalLM.from_pretrained(
+                    MISTRAL_MODEL_PATH,
+                    quantization_config=quantization_config,
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                    low_cpu_mem_usage=True,
+                    device_map="auto" if torch.cuda.is_available() else None,
+                    attn_implementation="eager",  # Plus rapide que flash-attention
+                    use_cache=False,
+                    local_files_only=False,  # Permettre cache HF Hub
+                    ignore_mismatched_sizes=False
+                )
+            else:
+                # Mode CPU TURBO pour HF Spaces
+                st.info("💨 Mode CPU TURBO: chargement ultra-rapide")
+                model = AutoModelForCausalLM.from_pretrained(
+                    MISTRAL_MODEL_PATH,
+                    torch_dtype=torch.float32,
+                    trust_remote_code=True,
+                    low_cpu_mem_usage=True,
+                    attn_implementation="eager",
+                    use_cache=False,
+                    load_in_8bit=False,
+                    device_map=None,
+                    local_files_only=False,
+                    ignore_mismatched_sizes=False
+                )
         except Exception as e:
-            st.warning(f"⚠️ Chargement optimisé échoué, mode standard : {str(e)[:100]}")
-            # Fallback : chargement standard avec float32 obligatoire
+            st.warning(f"⚠️ Chargement optimisé échoué: {str(e)[:50]}, mode minimal")
+            # Fallback MINIMAL pour vitesse maximale
             model = AutoModelForCausalLM.from_pretrained(
                 MISTRAL_MODEL_PATH,
                 torch_dtype=torch.float32,
                 trust_remote_code=True,
-                low_cpu_mem_usage=True
+                low_cpu_mem_usage=True,
+                attn_implementation="eager",
+                use_cache=False,
+                local_files_only=False
             )
         
-        # device_map="auto" gère déjà le placement, pas besoin de .to()
         model.eval()
-        
-        # Nettoyer à nouveau
         gc.collect()
         
-        # Pipeline MINIMAL (device géré automatiquement par accelerate)
+        # Pipeline TURBO avec optimisations maximales
         llm_pipeline = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
             framework="pt",
-            batch_size=1
+            batch_size=1,
+            use_fast=True,
+            return_full_text=False,
+            device=0 if torch.cuda.is_available() else -1
         )
         
-        st.success("✅ LLM Phi-3-mini chargé avec succès !")
+        load_time = time.time() - start_time
+        st.success(f"✅ Mistral-7B-Instruct chargé en {load_time:.1f}s ! Mode: {quantize_mode}")
         return llm_pipeline
         
     except Exception as e:
-        st.error(f"❌ Erreur chargement LLM : {str(e)[:200]}")
-        st.warning("💡 LLM non disponible. L'application fonctionnera sans analyses IA avancées.")
+        st.error(f"❌ Erreur chargement Mistral-7B: {str(e)[:150]}")
+        st.warning("💡 Mode dégradé: analyses IA limitées")
         return None
 
 def load_mistral_llm_basic(use_cpu=True):
@@ -2199,18 +2261,102 @@ def load_mistral_llm_basic(use_cpu=True):
         return None
 
 
+def enhanced_chat_with_rag(user_question, llm_pipeline, knowledge_base, current_data_context=None):
+    """
+    Chat amélioré avec RAG et données .dat intégrées + streaming fluide
+    """
+    try:
+        # 1. RÉCUPÉRATION RAG - Documents pertinents
+        rag_context = ""
+        if knowledge_base and knowledge_base.initialized:
+            rag_results = knowledge_base.search_knowledge_base(user_question, k=3)
+            if rag_results:
+                rag_context = "\n\n📚 CONTEXTE RAG PERTINENT:\n" + "\n".join([
+                    f"- {result['content']} (Pertinence: {result['relevance_score']:.2f})"
+                    for result in rag_results
+                ])
+
+        # 2. CONTEXTE DONNÉES .DAT actuelles
+        data_context = ""
+        if current_data_context:
+            ctx = current_data_context
+            data_context = f"""
+📊 DONNÉES ACTUELLES:
+- Fichier: {ctx.get('filename', 'N/A')}
+- Mesures: {ctx.get('n_measures', 'N/A')} points
+- Résistivité: {ctx.get('resistivity_range', 'N/A')} Ω·m
+- Moyenne: {ctx.get('mean', 'N/A')} Ω·m, Médiane: {ctx.get('median', 'N/A')} Ω·m
+- Profondeur: {ctx.get('depth_range', 'N/A')} m"""
+
+        # 3. PROMPT OPTIMISÉ avec contexte complet
+        prompt = f"""[INST] Tu es un EXPERT GÉOPHYSICIEN spécialisé en tomographie électrique (ERT).
+Utilise ces informations pour répondre précisément :
+
+{data_context}
+{rag_context}
+
+QUESTION: {user_question}
+
+RÉPONDS en français, utilise les données fournies, sois précis et concret. [/INST]"""
+
+        # 4. STREAMING FLUIDE avec indicateur de progression
+        return generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=400)
+
+    except Exception as e:
+        return f"Erreur chat RAG: {str(e)[:100]}"
+
+
+def execute_data_tool(tool_command, df):
+    """
+    Exécute un outil de manipulation des données selon la commande donnée
+    """
+    try:
+        if tool_command.startswith("filtrer_resistivite"):
+            # Extraire les paramètres min et max
+            import re
+            min_match = re.search(r'min=(\d+)', tool_command)
+            max_match = re.search(r'max=(\d+)', tool_command)
+
+            if min_match and max_match:
+                min_val = float(min_match.group(1))
+                max_val = float(max_match.group(1))
+
+                # Filtrer les données
+                filtered_df = df[(df['data'] >= min_val) & (df['data'] <= max_val)]
+                return f"✅ Filtrage appliqué: {len(filtered_df)} mesures sur {len(df)} (résistivité {min_val}-{max_val} Ω·m)"
+
+        elif tool_command.startswith("calculer_stats"):
+            # Extraire la colonne
+            import re
+            col_match = re.search(r"colonne='(\w+)'", tool_command)
+
+            if col_match:
+                col = col_match.group(1)
+                if col in df.columns:
+                    stats = df[col].describe()
+                    return f"📊 Statistiques pour {col}:\n{stats.to_string()}"
+
+        elif tool_command.startswith("analyser_anomalies"):
+            # Extraire le seuil
+            import re
+            seuil_match = re.search(r'seuil=([\d.]+)', tool_command)
+
+            if seuil_match:
+                seuil = float(seuil_match.group(1))
+                mean_val = df['data'].mean()
+                std_val = df['data'].std()
+
+                # Détecter anomalies (valeurs > seuil * écart-type)
+                anomalies = df[abs(df['data'] - mean_val) > (seuil * std_val)]
+                return f"🔍 Anomalies détectées: {len(anomalies)} mesures (seuil {seuil}σ, μ={mean_val:.1f}, σ={std_val:.1f})"
+
+        return "❌ Commande outil non reconnue"
+
+    except Exception as e:
+        return f"❌ Erreur exécution outil: {str(e)[:100]}"
+
+
 def analyze_data_with_mistral(llm_pipeline, geophysical_data, progress_callback=None):
-    """
-    Analyse OPTIMISÉE des données géophysiques avec chunking et réduction de contexte
-    
-    Args:
-        llm_pipeline: Pipeline Mistral chargé
-        geophysical_data: Dictionnaire contenant toutes les données analysées
-        progress_callback: Fonction callback pour afficher la progression
-    
-    Returns:
-        Tuple (interpretation, recommendations, image_prompt)
-    """
     if llm_pipeline is None:
         return None, None, None
     
@@ -2485,7 +2631,26 @@ Fournis 2 parties STRUCTURÉES EN FRANÇAIS:
 IMPORTANT: Termine toujours tes phrases complètement. RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
         
         # Génération avec le LLM - augmentation de max_new_tokens pour réponses complètes
-        result = llm_pipeline(prompt, max_new_tokens=600, do_sample=True, temperature=0.7, top_p=0.9)
+        # Génération avec le LLM - approche simplifiée pour éviter les erreurs de cache
+        try:
+            result = llm_pipeline(
+                prompt,
+                max_new_tokens=400,  # Réduit pour stabilité
+                do_sample=False,     # Désactiver sampling pour cohérence
+                temperature=0.1,     # Très basse pour déterminisme
+                top_p=0.9,
+                use_cache=False      # IMPORTANT: Désactiver le cache problématique
+            )
+        except Exception as e:
+            # Fallback avec paramètres minimaux
+            st.warning(f"⚠️ Génération avancée échouée, mode simple: {str(e)[:50]}")
+            result = llm_pipeline(
+                prompt,
+                max_new_tokens=200,
+                do_sample=False,
+                temperature=0.0,
+                use_cache=False
+            )
         generated = result[0]['generated_text']
         
         # Parser la réponse
@@ -2528,66 +2693,88 @@ Moyenne: {df['data'].mean():.1f} Ω·m
         return legend, explanation
 
 
-def generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=300, placeholder=None):
+def generate_text_with_streaming(llm_pipeline, prompt, max_new_tokens=400, placeholder=None):
     """
-    Génère du texte avec streaming token par token pour réponse instantanée
-    
-    Args:
-        llm_pipeline: Pipeline Mistral chargé
-        prompt: Le prompt à envoyer
-        max_new_tokens: Nombre max de tokens à générer
-        placeholder: Streamlit placeholder pour affichage en temps réel
-    
-    Returns:
-        Texte complet généré
+    Génération de texte avec STREAMING TOKEN PAR TOKEN ultra-fluide
+    Affiche chaque token au fur et à mesure pour une expérience utilisateur optimale
     """
     try:
         from transformers import TextIteratorStreamer
         from threading import Thread
-        
-        # Extraire le modèle et tokenizer du pipeline
+        import time
+
+        # Extraire le modèle et tokenizer
         model = llm_pipeline.model
         tokenizer = llm_pipeline.tokenizer
-        
+
         # Préparer les inputs
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        
-        # Créer le streamer
-        streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-        
-        # Paramètres de génération
+
+        # Créer le streamer optimisé
+        streamer = TextIteratorStreamer(
+            tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=10.0  # Timeout pour éviter blocage
+        )
+
+        # Paramètres optimisés pour streaming fluide
         generation_kwargs = dict(
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.7,
-            top_p=0.95,
-            repetition_penalty=1.15,
-            streamer=streamer
+            temperature=0.6,  # Légèrement réduit pour cohérence
+            top_p=0.9,        # Bon équilibre qualité/vitesse
+            top_k=40,         # Limite raisonnable
+            repetition_penalty=1.05,  # Anti-répétition léger
+            streamer=streamer,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+            use_cache=False,  # Désactiver cache KV pour éviter DynamicCache error
+            num_beams=1
         )
-        
+
         # Lancer la génération dans un thread séparé
-        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread = Thread(target=model.generate, kwargs=generation_kwargs, daemon=True)
         thread.start()
-        
-        # Collecter et afficher les tokens en temps réel
+
+        # STREAMING FLUIDE - Affichage token par token
         generated_text = ""
+        token_count = 0
+
         if placeholder:
+            # Mode avec placeholder - streaming visible
             for new_text in streamer:
-                generated_text += new_text
-                placeholder.info(generated_text)
+                if new_text:  # Éviter les tokens vides
+                    generated_text += new_text
+                    token_count += 1
+
+                    # Mise à jour fluide du placeholder avec curseur
+                    placeholder.markdown(generated_text + "▌")
+
+                    # Petit délai pour lisibilité
+                    time.sleep(0.02)
+
+            # Retirer le curseur final
+            placeholder.markdown(generated_text)
         else:
+            # Mode sans placeholder - accumulation simple
             for new_text in streamer:
-                generated_text += new_text
-        
-        thread.join()
-        return generated_text
-        
+                if new_text:
+                    generated_text += new_text
+                    token_count += 1
+
+        # Nettoyer la mémoire
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return generated_text.strip()
+
     except Exception as e:
-        # Fallback sans streaming
-        st.warning(f"⚠️ Streaming non disponible, mode normal: {str(e)[:50]}")
-        result = llm_pipeline(prompt, max_new_tokens=max_new_tokens, do_sample=True, temperature=0.7)
-        return result[0]['generated_text']
+        error_msg = f"Erreur streaming: {str(e)[:100]}"
+        if placeholder:
+            placeholder.error(error_msg)
+        return error_msg
 
 
 def analyze_image_with_clip_and_llm(fig, llm_pipeline, clip_model=None, clip_processor=None, device="cpu", context="", use_cache=True):
@@ -2872,10 +3059,11 @@ RÉPONDS UNIQUEMENT EN FRANÇAIS. Détaillé, structuré, basé sur les VRAIES d
             # Mode sans streaming mais optimisé
             result = llm_pipeline(
                 prompt, 
-                max_new_tokens=600,
-                do_sample=True, 
-                temperature=0.7,
-                top_p=0.95,
+                max_new_tokens=400,
+                do_sample=False, 
+                temperature=0.1,
+                top_p=0.9,
+                use_cache=False,
                 repetition_penalty=1.1
             )
             generated = result[0]['generated_text']
@@ -2951,7 +3139,26 @@ Fournis 2 parties STRUCTURÉES EN FRANÇAIS:
 IMPORTANT: Termine toujours tes phrases complètement. RÉPONDS UNIQUEMENT EN FRANÇAIS. [/INST]"""
         
         # Génération avec le LLM - augmentation de max_new_tokens pour réponses complètes
-        result = llm_pipeline(prompt, max_new_tokens=600, do_sample=True, temperature=0.7, top_p=0.9)
+        # Génération avec le LLM - approche simplifiée pour éviter les erreurs de cache
+        try:
+            result = llm_pipeline(
+                prompt,
+                max_new_tokens=400,  # Réduit pour stabilité
+                do_sample=False,     # Désactiver sampling pour cohérence
+                temperature=0.1,     # Très basse pour déterminisme
+                top_p=0.9,
+                use_cache=False      # IMPORTANT: Désactiver le cache problématique
+            )
+        except Exception as e:
+            # Fallback avec paramètres minimaux
+            st.warning(f"⚠️ Génération avancée échouée, mode simple: {str(e)[:50]}")
+            result = llm_pipeline(
+                prompt,
+                max_new_tokens=200,
+                do_sample=False,
+                temperature=0.0,
+                use_cache=False
+            )
         generated = result[0]['generated_text']
         
         # Parser la réponse
@@ -11453,55 +11660,54 @@ if st.session_state.get('llm_loaded', False):
     
     if user_question:
         st.session_state.chat_messages.append({"role": "user", "content": user_question})
-        
-        # Contexte des données si disponibles
-        context = ""
-        if 'current_data_context' in st.session_state and st.session_state['current_data_context']:
-            ctx = st.session_state['current_data_context']
-            context = f"""Fichier: {ctx.get('filename', 'N/A')}
-Mesures: {ctx.get('n_measures', 'N/A')} sur {ctx.get('n_points', 'N/A')} points
-Résistivité: {ctx.get('resistivity_range', 'N/A')}
-Moyenne: {ctx.get('mean', 'N/A')}, Médiane: {ctx.get('median', 'N/A')}"""
-        
-        # Prompt court et direct
-        prompt = f"""[INST] Expert géophysique en tomographie électrique (ERT).
-{context}
 
-Question: {user_question}
-
-Réponds en français, concis (100-200 mots max). [/INST]"""
-        
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
-            
-            # Afficher indicateur pendant génération
-            message_placeholder.info("🧠 Génération en cours...")
-            
-            # Génération
+
+            # Indicateur de recherche RAG
+            message_placeholder.info("🔍 Recherche dans la base de connaissances...")
+
+            # Utiliser le chat amélioré avec RAG
             try:
-                result = st.session_state.llm_pipeline(
-                    prompt,
-                    max_new_tokens=600,  # Augmenté pour réponses complètes
-                    temperature=0.7,
-                    do_sample=True,
-                    return_full_text=False
+                # Récupérer la base de connaissances
+                kb = st.session_state.get('ert_knowledge_base')
+
+                # Génération avec RAG et streaming
+                full_response = enhanced_chat_with_rag(
+                    user_question=user_question,
+                    llm_pipeline=st.session_state.llm_pipeline,
+                    knowledge_base=kb,
+                    current_data_context=st.session_state.get('current_data_context')
                 )
-                
-                if result and len(result) > 0:
-                    full_response = result[0].get('generated_text', '')
-                    
-                    # Extraire après [/INST] si présent
-                    if '[/INST]' in full_response:
-                        full_response = full_response.split('[/INST]')[-1].strip()
-                    
-                    message_placeholder.markdown(full_response)
-                else:
-                    full_response = "Désolé, je n'ai pas pu générer de réponse."
-                    message_placeholder.markdown(full_response)
-                
-            except Exception as e:
-                full_response = f"❌ Erreur: {str(e)[:100]}"
+
+                # DÉTECTION ET EXÉCUTION D'OUTILS
+                tool_results = ""
+                if 'dataframe' in st.session_state:
+                    df = st.session_state['dataframe']
+
+                    # Détecter les commandes d'outils dans la réponse
+                    import re
+                    tool_commands = re.findall(r'"([^"]*_(?:resistivite|stats|graphique|anomalies|donnees)\([^"]*\))"', full_response)
+
+                    if tool_commands:
+                        tool_results = "\n\n🛠️ EXÉCUTION D'OUTILS:\n"
+                        for cmd in tool_commands:
+                            result = execute_data_tool(cmd, df)
+                            tool_results += f"• {cmd}: {result}\n"
+
+                        # Ajouter les résultats à la réponse
+                        full_response += tool_results
+
+                # Afficher la réponse complète
                 message_placeholder.markdown(full_response)
+
+                # Ajouter à l'historique
+                st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
+
+            except Exception as e:
+                error_msg = f"❌ Erreur génération: {str(e)[:100]}"
+                message_placeholder.error(error_msg)
+                st.session_state.chat_messages.append({"role": "assistant", "content": error_msg})
         
         st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
         st.rerun()

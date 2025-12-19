@@ -28,3 +28,13 @@ __pycache__/
 models/
 *.pkl
 *.faiss
+
+# Secrets et fichiers sensibles
+.env
+.env.*
+*.key
+*.pem
+secrets/
+keys/
+*.token
+*secret*

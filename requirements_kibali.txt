@@ -1,0 +1,110 @@
+# DEPENDANCES TEMPLATE KIBALI ULTRA-RAPIDE
+# =========================================
+#
+# Ce fichier liste toutes les dépendances nécessaires
+# pour utiliser le template KIBALI Ultra-Fast.
+#
+# Installation:
+#   pip install -r requirements_kibali.txt
+#
+# Ou pour une installation complète:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#   pip install -r requirements_kibali.txt
+
+# =============================================================================
+# DEPENDANCES PRINCIPALES
+# =============================================================================
+
+# PyTorch (avec CUDA 11.8 recommandé pour compatibilité maximale)
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Transformers (dernière version pour optimisations)
+transformers>=4.30.0
+
+# Quantification 4-bit/8-bit (essentiel pour performance)
+bitsandbytes>=0.41.0
+
+# Accélération GPU (optionnel mais recommandé)
+accelerate>=0.20.0
+
+# =============================================================================
+# DEPENDANCES OPTIONNELLES (pour fonctionnalités avancées)
+# =============================================================================
+
+# Pour analyses géologiques avancées
+numpy>=1.21.0
+pandas>=1.5.0
+scipy>=1.9.0
+scikit-learn>=1.2.0
+
+# Pour visualisations (optionnel)
+matplotlib>=3.5.0
+plotly>=5.10.0
+seaborn>=0.11.0
+
+# Pour traitement d'images (optionnel)
+Pillow>=9.0.0
+opencv-python>=4.7.0
+
+# Pour API REST (si vous voulez créer un serveur)
+fastapi>=0.100.0
+uvicorn>=0.22.0
+
+# Pour monitoring et logging avancé
+psutil>=5.9.0
+GPUtil>=1.4.0
+
+# =============================================================================
+# DEPENDANCES DE DEVELOPPEMENT (optionnel)
+# =============================================================================
+
+# Tests et validation
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Formatage et linting
+black>=22.0.0
+flake8>=5.0.0
+isort>=5.12.0
+
+# Documentation
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.2.0
+
+# =============================================================================
+# INSTALLATION RECOMMANDEE
+# =============================================================================
+#
+# 1. PyTorch avec CUDA (si GPU disponible):
+#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#
+# 2. Dépendances principales:
+#    pip install transformers accelerate bitsandbytes
+#
+# 3. Dépendances géologiques (recommandé):
+#    pip install numpy pandas scipy scikit-learn matplotlib
+#
+# 4. Pour développement complet:
+#    pip install -r requirements_kibali.txt
+#
+# =============================================================================
+# VERIFICATION D'INSTALLATION
+# =============================================================================
+#
+# Exécutez ce script Python pour vérifier l'installation:
+#
+# python -c "
+# import torch
+# import transformers
+# import bitsandbytes
+# print('✅ PyTorch version:', torch.__version__)
+# print('✅ CUDA disponible:', torch.cuda.is_available())
+# print('✅ Transformers version:', transformers.__version__)
+# print('✅ BitsAndBytes disponible')
+# print('🎉 Installation réussie!')
+# "
+#
+# =============================================================================</content>
+<parameter name="filePath">/home/belikan/requirements_kibali.txt
